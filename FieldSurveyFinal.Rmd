@@ -1,0 +1,4332 @@
+---
+title: "Analysis for the field survey of Paratemnoides nidificator activity"
+author: "Laura Segura"
+date: "21/Aug/2021"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+Parking downhill: 
+Redo binomial models: check if removing fandom factor is needed and select models
+Do descriptive plots for corresponding models
+Summarize results for Carola
+Figure out analysis for quantity of individuals
+
+
+Preguntas GB:
+Si el glmm dice que isSingular: la varianza del factor aleatorio es muy poca, mejor quitar el factor aleatorio o no?
+ aic debe diferir por mas de dos unidades, si tiene menos de dos unidades es lo mismo y se escge el mas sencilo. O hacer anova d los modelos
+
+
+Preguntas en general:
+Ejemplo de chelas afuera todas las colonias: si la variable tiempo era parte de mi pregunta, pero al final el model dice que da lo mismo incluirla que excluirla (o sea, la variable realmente no esta ayudando a explicar nada en el modelo), cual dejo como modelo final? 
+
+Para tomar en cuenta el tiempo: es mejor usar tiempo como una variable continua (minutos del dia, hora del dia), discreta (agrupandolos por hora) o categorica (hora)
+
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#chunk_output_type: inline
+```
+# Loading the libraries
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(survival)
+library(ggplot2)
+library(forcats)
+library(survminer)
+library(emmeans)
+library(googlesheets4)
+library(forcats)
+library(scales)
+library(ggridges)
+library(NRES803)
+library(MASS)
+library(RColorBrewer)
+library(nlme)
+library(gridExtra)
+library(pscl)
+library(glmmADMB)
+library(ordinal)
+library(purrr)
+library(lme4)
+library(sjPlot)
+library(mclogit)
+library(pander)
+library(MuMIn)
+library(AICcmodavg)
+library(broom)
+library(DHARMa)
+library(statmod)
+library(broom.mixed)
+library(grid)
+```
+
+# Getting data 
+
+## Signing up to my google account and getting the data sheet
+
+I just need to run this line to give access to my google account to tidy verse to be able to work on the google sheet more easily
+
+```{r, message=FALSE}
+gs4_auth(email="laurasegura.bio@gmail.com")
+
+```
+
+```{r}
+data1<-read_sheet('https://docs.google.com/spreadsheets/d/1A8WTomc5c3l5xX3ZSnJoAV-uPuUVoim1g9wf6VQqkss/edit?gid=0#gid=0', sheet="Environmental info", na = c("", "NA","NULL", NULL))
+
+data2<-read_sheet('https://docs.google.com/spreadsheets/d/1A8WTomc5c3l5xX3ZSnJoAV-uPuUVoim1g9wf6VQqkss/edit?gid=0#gid=0', sheet="ActJunio", na = c("", "NA","NULL", NULL))
+#Removing the first 3 example rows and the rows observations not part of the census, but extra info from the colony size census
+data1<-data1[-c(1:3),]
+
+
+#Removing the first 3 example rows and the rows observations not part of the census, but extra info from the colony size census
+data1<-data1[-c(1:3),]
+
+
+data<-bind_rows(data1,data2)%>%
+  mutate(colony=as.factor(Colonia),
+         date=ymd(Fecha),
+         location=as.factor(Location),
+         time2=format(as.POSIXct(Hora), format="%H:%M"),
+         time=hm(time2),
+         day=ymd(Day),
+         t.amb=as.numeric(Temp_amb),
+         h.amb=as.numeric(Hum_amb),
+         t1=as.numeric(`Temp_1 (con_pseudos)`),
+         t2=as.numeric(`Temp_2_(con_pseudos)`),
+         t.pseudos=(t1+t2)/2,
+         t3=as.numeric(`Temp_3(sin_pseudos)`),
+         t4=as.numeric(`Temp_4_(sin_pseudos)`),
+         t.nopseudos=(t3+t4)/2,
+         t.tree=(t1+t2+t3+t4)/4,
+         rain=factor(Ult_lluvia, levels=c("Recent", "Afternoon","Morning", "1Day","2Days" )),
+         raindate=ymd(Fecha_ult_lluvia),
+         raintime=format(as.POSIXct(Hora_ult_lluvia), format="%H:%M"),
+         raintime2=hm(raintime),
+         luna=as.factor(Luna),
+         phase=factor(Fase_lunar,levels=c("NM","CM", "FM", "WM")),
+         mlight=as.factor(Luz_luna),
+         sky=as.factor(Cielo),
+         bark=factor(Corteza, levels=c("Dry","Moist", "Wet", "NA")),
+         can.cov=factor(Cobertura, levels=c("Low","Medium", "High", "NA")),
+         mosss=as.factor(Musgo),
+         vis=as.factor(Visibilidad),
+         act=as.factor(Escala_actividad), 
+         act2=as.numeric(Escala_actividad),
+         pq=Q/total,
+         pc=C/total,
+         pa=A/total,
+         ps=S/total,
+         pe=E/total,
+         pf=F/total, 
+         hour=hour(time),
+         hour2=factor(hour,levels=c("20","21", "22", "23", "0", "1", "2", "3", "4")),
+         act3=ceiling(act2),
+          act4=as.factor(act3)
+         ) %>%
+  filter(Census=="census")
+  
+  
+data<-dplyr::select(data, -c(Colonia, Location, Day, Temp_amb, Hum_amb,`Temp_1 (con_pseudos)`, `Temp_2_(con_pseudos)`,`Temp_3(sin_pseudos)`, `Temp_4_(sin_pseudos)`, Luna, Fase_lunar, Visibilidad, Escala_actividad,  Ult_lluvia, Ultima_lluvia, Luz_luna, Fecha_ult_lluvia, Hora_ult_lluvia,Cielo, Obs_cobertura, Cobertura, Musgo, Presas_ID,num_parasitos, Actividad_parasitos,Actividad_colonia, Otras_observaciones, Census  )) 
+  
+ # select(=c(colony, location, date,day,time,time2, t.amb,h.amb, t.pseudos, t.nopseudos,t.tree, luna, phase, vis, Presas_ID, Presas_frecuencia, act, act2))
+
+data$daytime<-as.POSIXct(paste(data$day, data$time2), format="%Y-%m-%d %H:%M")
+data$obsdaytime<-as.POSIXct(paste(data$date, data$time2), format="%Y-%m-%d %H:%M")
+data$raindaytime<-as.POSIXct(paste(data$raindate, data$raintime), format="%Y-%m-%d %H:%M")
+data$rainpassed<- data$obsdaytime-data$raindaytime 
+data$rainpassed2<-difftime(data$obsdaytime,data$raindaytime, units="hours")         
+
+ 
+
+
+str(data)
+
+
+
+        
+
+data2<-data%>%
+  drop_na(act) %>%
+  filter(location!="Laguna",
+         hour>19) # OJo: aca esta filtrando por las horas para que solo sea todo antes de la media noche
+         
+
+data3<-data%>%
+  drop_na(act) %>%
+  filter(location!="Laguna")
+        
+```
+
+# Questions
+
+1. How does activity vary with hour (time)?
+How does activity vary between locations?
+2. How does activity vary with ambient temperature?
+3. How does activity vary with ambient humidity?
+4. How does activity vary with temperature at the crevice?
+5. Are the temperatures of the occupied crevices different to the non-occupied ones?
+6. How does activity vary with overall tree temperautre?
+7. How does activity vary with lunar condition?
+8. How does activity vary with lunar phase?
+9. What are the most common prey items?
+10.Do predation events vary with ambient temperature?
+11. Do predation events vary with humidity?
+
+# Looking at arthropods associated
+```{r}
+dataart<-read_sheet('https://docs.google.com/spreadsheets/d/1A8WTomc5c3l5xX3ZSnJoAV-uPuUVoim1g9wf6VQqkss/edit?gid=0#gid=0', sheet="Arthropods_associated", na = c("", "NA","NULL", NULL))
+
+
+dataart<-dataart %>% filter(date>="2025-05-01",
+                            Artropodo_orden!="REVISAR") %>% 
+  dplyr::select(c(colony, date, hour, location, Artropodo_orden, Artropodo_frecuencia, Cerca_de_colonia)) %>%
+  mutate(colony=as.factor(colony),
+         location=as.factor(location),
+         ord=as.factor(Artropodo_orden),
+         freq=as.numeric(Artropodo_frecuencia),
+         cerca=as.factor(Cerca_de_colonia)) 
+
+str(dataart)
+levels(dataart$ord)
+```
+
+## Plotting artropods on colonies
+```{r}
+dataart %>% group_by(ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total)) %>%
+  ggplot(aes(x=ord, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Order")
+ggsave("Plots/arthropods_all.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+dataart %>% group_by(ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total))
+
+dataart %>% group_by(location,ord) %>%
+  summarize(total=sum(freq)) %>%
+  ggplot(aes(x=ord, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Order") + facet_wrap(~location, nrow=3)
+ggsave("Plots/arthropods_location.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+dataart %>% group_by(location,ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total))
+
+
+```
+## Plotting only nearby artropods on colonies
+```{r}
+dataart %>% filter(cerca=="si") %>% group_by(ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total)) %>%
+  ggplot(aes(x=ord, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Order")
+ggsave("Plots/Nearby_all.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+dataart %>% filter(cerca=="si") %>%group_by(ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total))
+
+dataart %>%filter(cerca=="si") %>% group_by(location,ord) %>%
+  summarize(total=sum(freq)) %>%
+  ggplot(aes(x=ord, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Order") + facet_wrap(~location, nrow=3)
+ggsave("Plots/Nearby_location.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+dataart %>% filter(cerca=="si") %>%group_by(location,ord) %>%
+  summarize(total=sum(freq)) %>% 
+  arrange(desc(total))
+
+
+```
+## Plotting only prey
+```{r}
+data2<-data2 %>% mutate(presas=as.factor(Presas_ID2))
+levels(data2$presas)
+
+data2 %>% drop_na(presas) %>% group_by(presas) %>%
+  summarize(total=sum(Presas_frecuencia)) %>% 
+  arrange(desc(total)) %>%
+  ggplot(aes(x=presas, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Prey")
+ggsave("Plots/Prey_all.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2 %>% drop_na(presas) %>% group_by(presas) %>%
+  summarize(total=sum(Presas_frecuencia)) %>% 
+  arrange(desc(total))
+
+data2 %>% drop_na(presas) %>% group_by(location,presas) %>%
+  summarize(total=sum(Presas_frecuencia)) %>%
+  ggplot(aes(x=presas, y=total))+geom_bar(stat="identity") + theme_classic()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("Frecuency") + xlab("Order") + facet_wrap(~location, nrow=3)
+ggsave("Plots/Prey_location.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2 %>% drop_na(presas) %>% group_by(location,presas) %>%
+  summarize(total=sum(Presas_frecuencia)) %>% 
+  arrange(desc(total))
+
+
+```
+
+
+
+# Checking variation of environmental variables per colony
+## Time
+```{r}
+# All data
+ggplot(data3, aes(y=daytime, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("Time") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=daytime, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("Time") + xlab(" ")+theme_classic()
+
+```
+
+## Temperatures
+```{r}
+
+## T.amb
+# All data
+ggplot(data3, aes(y=t.amb, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T. amb") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=t.amb, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T.amb") + xlab(" ")+theme_classic()
+
+## t.pseudos
+# All data
+ggplot(data3, aes(y=t.pseudos, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T.pseudos") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=t.pseudos, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T.pseudos") + xlab(" ")+theme_classic()
+
+## t.pseudos
+# All data
+ggplot(data3, aes(y=t.tree, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T.tree") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=t.tree, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("T.tree") + xlab(" ")+theme_classic()
+
+```
+
+## Humidity
+```{r}
+# All data
+ggplot(data3, aes(y=h.amb, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("H. amb") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=h.amb, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("H.amb") + xlab(" ")+theme_classic()
+```
+
+## Rain
+```{r}
+# All data
+ggplot(data3, aes(y=raintime2, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("Raintime") + xlab(" ")+theme_classic() 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(y=raintime2, x=colony))+geom_boxplot()+ geom_jitter(color="red", alpha=0.5)+ ylab("Raintime") + xlab(" ")+theme_classic()
+```
+
+
+
+## Light, moonphase and sky conditions
+```{r}
+## Luna
+# All data
+ggplot(data3, aes(x=colony))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~luna) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=colony))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~luna) 
+
+## Phase
+ggplot(data3, aes(x=phase))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=phase))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+## mlight
+ggplot(data3, aes(x=mlight))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=mlight))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+## sky
+ggplot(data3, aes(x=sky))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=sky))+geom_bar()+ ylab("Luna") + xlab(" ")+theme_classic()+ facet_wrap(~colony)
+```
+
+
+## Bark, moss, canopy
+```{r}
+## Bark
+# All data
+ggplot(data3, aes(x=bark))+geom_bar()+ ylab("Bark") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=bark))+geom_bar()+ ylab("Bark") + xlab(" ")+theme_classic()+ facet_wrap(~colony)
+
+## Canopy coverage
+# All data
+ggplot(data3, aes(x=can.cov))+geom_bar()+ ylab("Canopy coverage") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=can.cov))+geom_bar()+ ylab("Canopy coverage") + xlab(" ")+theme_classic()+ facet_wrap(~colony)
+
+## Moss
+# All data
+ggplot(data3, aes(x=mosss))+geom_bar()+ ylab("Moss") + xlab(" ")+theme_classic()+ facet_wrap(~colony) 
+
+# Cutting BCI data to just 8 to 12
+ggplot(data2, aes(x=mosss))+geom_bar()+ ylab("Moss") + xlab(" ")+theme_classic()+ facet_wrap(~colony)
+
+```
+
+
+
+# Checking temperature correlations
+
+## How close are the tree temp and the ambient temperature? Are they correlated?
+```{r}
+temp<-data3%>%filter(date<"2025-06-01") %>%
+  mutate(diff=t.amb-t.pseudos) %>%
+  drop_na(act) %>%
+  drop_na(diff)%>%
+  filter(location!="Laguna")
+
+
+temp%>%
+  ggplot(aes(y=diff, x="")) +geom_boxplot() + geom_jitter()+ ylab("Difference") + xlab(" ")+theme_classic()
+ggsave("Plots/tempsdiff.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+mean(abs(temp$diff))
+sd(abs(temp$diff))
+
+summary(lm(data=temp, t.pseudos~t.amb))
+ggplot(data=temp, aes(x=t.amb, y=t.pseudos))+geom_point()+geom_smooth(method="lm")
+
+shapiro.test(temp$t.amb) #T.amb not normal
+shapiro.test(temp$t.pseudos) # t. pseudos is normal
+
+#Data not normal, therefore, I should use the Pearson correlation test
+cor.test(temp$t.amb, temp$t.pseudos, method="pearson")
+
+#there is a correlation between the ambient temp and the temp of the occupied crevices
+
+```
+
+There is a correlation between the ambient temp and the temp of the occupied crevices
+
+
+## Are temperature and humidity correlated?
+```{r}
+shapiro.test(data3$t.amb)
+shapiro.test(data3$h.amb)
+
+#Data is not normal, therefore, I should use the Spearman correlation test
+cor.test(data3$t.amb, data3$h.amb, method="spearman")
+
+
+ggplot(data2, aes(y=t.amb, x=h.amb))+geom_point() +geom_smooth(method="lm") + ylab("Temperature (°C)") + xlab("Humidity (%)")+theme_classic()
+ggsave("Plots/temps-humrel.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+```
+
+There is a negative correlation between ambient temperature and ambien humidity
+
+## Are temperature and hour correlated?
+```{r}
+
+#Data is not normal, therefore, I should use the Spearman correlation test
+cor.test(data3$t.amb, data3$time, method="spearman")
+
+
+ggplot(data3, aes(y=t.amb, x=daytime))+geom_point() +geom_smooth(method="lm") + ylab("Temperature (°C)") + xlab("Time of day")+theme_classic()
+ggsave("Plots/temps-time.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+#Data is not normal, therefore, I should use the Spearman correlation test
+cor.test(data3$t.amb, data3$hour, method="spearman")
+
+
+ggplot(data3, aes(y=t.amb, x=hour))+geom_point() +geom_smooth(method="lm") + ylab("Temperature (°C)") + xlab("Time of day")+theme_classic()
+ggsave("Plots/temps-hour.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+
+```
+No hay correlacion entre hora y temperatura
+
+
+
+
+# Examining each behavior instead of the activity scale
+
+## PRESENCE/ABSENCE of each behavior: All colonies between 8pm and 12 midnight
+
+### Organizing the data
+```{r}
+
+# Total number of pseudoscorpions doing the activity
+databin<-data2 %>%  
+  #dplyr::select(colony, location,t.amb, h.amb, phase, time, daytime, hour, Q, C, A, S, E, F, total) %>%
+  pivot_longer(cols=(7:12), names_to = "beh" , values_to="inds") %>%
+  mutate(prop=inds/total, 
+         hour2=factor(hour,levels=c("20","21", "22", "23", "0", "1", "2", "3", "4")),
+         bin=if_else(inds>0,1,0),
+         beh2=case_when(beh=="A"~"Feeding",
+                        beh=="C"~"Outside",
+                        beh=="E"~"Hiding",
+                        beh=="F"~"Outside",
+                        beh=="Q"~"Chelaes exp.",
+                        beh=="S"~"Peeking out",
+                        TRUE~NA),
+         timesec=as.numeric(time),
+         timemin=(as.numeric(time))/60,
+         halfhour=case_when(between(timemin, 1200,1230)~"20:30",
+                                  between(timemin, 1231,1260)~"21:00", 
+                                  between(timemin, 1261,1290)~"21:30",
+                                  between(timemin, 1291,1320)~"22:00",
+                                  between(timemin, 1321,1350)~"22:30",
+                                  between(timemin, 1351,1380)~"23:00",
+                                  between(timemin, 1381,1410)~"23:30",
+                                  between(timemin, 1411,1440)~"24:00",
+                                  TRUE~NA),
+         tempb=case_when(between(t.amb, 23.8,24.5)~"24.5",
+                         between(t.amb, 24.5, 25.0)~"25",
+                         between(t.amb, 25.0, 25.5)~"25.5",
+                         between(t.amb, 25.5, 26.0)~"26",
+                         between(t.amb, 26.0, 26.5)~"26.5",
+                         between(t.amb, 26.5, 27.0)~"27",
+                         between(t.amb, 27.0, 27.5)~"27.5",
+                         between(t.amb, 27.5, 28.0)~"28",
+                         TRUE~NA))
+mr<-min(databin$rainpassed2)
+mb<-mr-mr
+databin<-databin%>%mutate(rainb=case_when(between(rainpassed2, mb,mb+2) ~"0-2",
+                         between(rainpassed2, mb+2,mb+6)~"2-6",
+                         between(rainpassed2, mb+6, mb+12)~"6-12",
+                         between(rainpassed2, mb+12, mb+18)~"12-18",
+                         between(rainpassed2, mb+18, mb+24)~"18-24",
+                         between(rainpassed2, mb+24, mb+30)~"24-30",
+                         between(rainpassed2, mb+30, mb+36)~"30-36",
+                         between(rainpassed2, mb+36, mb+42)~"36-42",
+                         between(rainpassed2, mb+42, mb+48)~"42-48",
+                         between(rainpassed2, mb+48, mb+57)~"48+",
+                         TRUE~NA)
+  )
+
+databin$rainb<-factor(databin$rainb,levels=c("0-2","2-6", "6-12", "12-18", "18-24", "24-30", "30-36", "36-42", "42-48",  "48+"))         
+
+databin$beh2<-factor(databin$beh2, levels=c("Peeking out", "Chelaes exp.", "Feeding", "Outside", "Hiding"))
+
+databin<-databin %>%  dplyr::select(colony, timemin,obsdaytime,time,hour,  t.amb, rainpassed2, mlight, phase, bin, total, beh, beh2, halfhour, tempb, rainb)
+
+#timesec has a huge value compared to the scale of the other values and the model is giving me a warning, so I will re-scale it by deducting the minimum timesec value and going from then onwards on time
+
+levels(databin$rainb)
+summary(databin)
+
+```
+
+### CHELAES EXPOSED
+#### Determining the global model
+```{r}
+#Getting the dataset for just this behavior
+chela<-databin%>%filter(beh=="Q")
+sum(chela$bin)
+nrow(chela)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=chela, family=binomial)
+summary(b1) # This model gives the isSingular warning: the colony random factor has a variance of zero, the odel is not detecting diferences between the colonies, so I can consider removing it and see which model is better
+
+b2<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chela, family=binomial) # same model as before but without the colony
+summary(b2)
+
+# Comparing the models with an anova
+anova(b1,b2) # the models are identical: it is the same to include or exclude the random factor, so I will go with the simpler model, without the random factor
+
+# Final model
+b2<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chela, family=binomial)
+summary(b2)
+```
+
+#### Checking residuals of global model
+```{r}
+# Global model without the random factor (best model according to anova)
+## Checking for overdispersion
+summary(b2)
+glanceb2<-glance(b2)
+glanceb2
+gofb2 <- with(glanceb2,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb2 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 161.18, df=152, p=0.29
+
+## Plotting residuals for each variable
+b2test <- augment(b2) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+lin.time<- ggplot(b2test, aes(x = timemin, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.temp <- lin.time + aes(x = t.amb)
+lin.rainpassed2 <- lin.time + aes(x = rainpassed2)
+lin.phase <- lin.time + aes(x = phase)
+#Putting all graphs together
+grid.arrange(lin.time, lin.temp, lin.rainpassed2, lin.phase)
+
+## Checking residuals in general
+check_assumptions(b2)
+t2<-simulateResiduals(b2)
+plot(t2) 
+
+## CONCLUSION: the model is robust enough, it is not overdispersed and the residuals look good
+
+
+# Model with the random factor
+
+summary(b1)
+gofb1 <- pchisq(161.2,151,lower=FALSE) #creating the object that would allow to get the p-value
+gofb1 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 161.18, df=151, p=0.27
+
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=chela, family=binomial)
+summary(b1)
+# Checking residuals
+#check_assumptions(b1)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+#ggplot(residb1, aes(x = mlight, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0,linetype = 2)
+
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+t1<-simulateResiduals(b1)
+plot(t1)
+
+## CONCLUSION: the model is robust enough, it is not overdispersed and the residuals look good
+
+```
+#### Plotting GLOBAL model predictions
+```{r}
+# Plotting model predictions
+p1<-plot_model(b2, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted probability of chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+p1
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+p2<-plot_model(b2, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted probability of chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p3<-plot_model(b2, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted probability of chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+p3
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p4<-plot_model(b2, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted probability of chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+p4
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+ rremove("ylab") ,p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab") , ncol=2, nrow=2, labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of chelaes exposed", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+#plot_model(b2, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+#  theme_classic(base_size = 18)
+```
+
+#### Checking which variables contribute to the model
+```{r}
+
+# Checking without the random factor
+models <- list(bin~1,
+              bin~timemin,
+              bin~t.amb,
+              bin~rainpassed2,
+              bin~phase,
+              bin~timemin+t.amb,
+              bin~timemin+rainpassed2,
+              bin~timemin+phase,
+              bin~t.amb+rainpassed2,
+               bin~t.amb+phase,
+              bin~rainpassed2+phase,
+               bin~timemin+t.amb+rainpassed2,
+               bin~timemin+t.amb+phase,
+              bin~t.amb+rainpassed2+phase,
+              bin~timemin+t.amb+rainpassed2+phase)
+fits <- map(models, glm,family=binomial, data=chela)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+pander(aictab(fits,as.character(models)))
+
+# This shows that model 15 and model 14 have very close AIC values (menos de 2 unidades de diferencia) entonces voy a compararlos con un anova
+
+models[[15]]
+models[[14]]
+
+b2<-glm(bin ~ timemin + t.amb + rainpassed2 + phase, data=chela, family=binomial)
+summary(b2)
+
+b3<-glm(bin~ t.amb + rainpassed2 + phase, data=chela, family=binomial)
+summary(b3)
+
+anova(b2,b3,test="Chisq")
+
+# Conclusion: the variable time is not really contributing to the model, so I could simplify the model by removing it
+
+pander(summary(b3))
+```
+
+
+#### Checking residuals model without time
+```{r}
+# Second best model, technically the same as the global model minus the time
+summary(b3)
+glanceb3<-glance(b3)
+glanceb3
+#Testing over-disperssion of the model
+gofb3 <- with(glanceb3,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb3 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 163.4613	, df=153, p=0.27
+
+#Plotting each variable
+b3test <- augment(b3) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+
+lin.temp<- ggplot(b3test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.rainpassed2 <- lin.temp + aes(x = rainpassed2)
+lin.phase <- lin.temp + aes(x = phase)
+#Putting all graphs together
+grid.arrange(lin.temp, lin.rainpassed2, lin.phase)
+
+#Checking residuals in general
+check_assumptions(b3)
+
+
+t3<-simulateResiduals(b3)
+plot(t3)
+
+
+```
+
+#### Plotting model predictions
+```{r}
+# Plotting model predictions
+#plot_model(b1, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+#  labs(x = "Time of day (min)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+#  theme_classic(base_size = 18)
+#ggsave("Plots/Presence Absence behaviors/PA_chelae_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+P1<-plot_model(b2, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+P1
+ggsave("Plots/Presence Absence behaviors/PA_chelae_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+P2<-plot_model(b2, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+P2
+ggsave("Plots/Presence Absence behaviors/PA_chelae_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+P3<-plot_model(b2, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+P3
+ggsave("Plots/Presence Absence behaviors/PA_chelae_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+P4<-ggplot(chela, aes(y=bin, x=timemin))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+P4
+
+all<-ggarrange(P4+rremove("ylab"),P1+ rremove("ylab") ,P2+ rremove("ylab") ,P3+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of chelaes exposed", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/PA_chelae_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+plot_model(b2, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  theme_classic(base_size = 18)
+```
+
+
+#### Descriptive plots
+```{r}
+# Barplots
+
+#Hour
+hourbin<-chela %>% group_by(halfhour, bin) %>%
+  summarize(count=n())
+hourbin
+ggplot(hourbin, aes(x=halfhour, y=bin))+geom_point(aes(size=count)) 
+
+p1<-hourbin%>%ggplot(aes(x=halfhour, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hour")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)+ theme(axis.text.x=element_text(angle=90, hjust=1))
+p1
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_chelae_hour.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#T.amb
+tempbin<-chela%>%  group_by(tempb, bin) %>%
+  summarize(count=n())
+tempbin
+ggplot(tempbin, aes(x=tempb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p2<-tempbin%>%ggplot(aes(x=tempb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_chelae_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Rain
+rainbin<-chela %>% 
+  group_by(rainb, bin) %>%
+  summarize(count=n())
+rainbin
+ggplot(rainbin, aes(x=rainb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p3<-rainbin%>%ggplot(aes(x=rainb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hours since last rain")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18) + theme(axis.text.x=element_text(angle=90, hjust=1))
+p3
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_chelae_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Phase
+phasebin<-chela %>% 
+  group_by(phase, bin) %>%
+  summarize(count=n())
+phasebin
+ggplot(phasebin, aes(x=phase, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p4<-phasebin%>%ggplot(aes(x=phase, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Moon phase")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present"))+
+  theme_classic(base_size = 18)
+p4
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_chelae_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+rremove("ylab"),p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25, common.legend = T, legend="bottom", align="hv")
+
+all
+
+annotate_figure(all, left=textGrob("Proportion", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_chelae_all_bar.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+```
+
+### PEEKING OUT
+#### Determining the global model
+```{r}
+#Getting the dataset for just this behavior
+peek<-databin%>%filter(beh=="S")
+sum(peek$bin)
+nrow(peek)
+
+
+peek$rainpassed3<-as.numeric(peek$rainpassed2)
+summary(peek)
+
+minus<-min(peek$timemin)
+minus
+peek$timemin2<-(peek$timemin-minus)/60
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=peek, family=binomial)
+summary(b1) # This model gives the isSingular warning: the colony random factor has a variance of zero, the odel is not detecting diferences between the colonies, so I can consider removing it and see which model is better
+
+b2<-glm(bin~timemin+t.amb+rainpassed2+phase, data=peek, family=binomial) # same model as before but without the colony
+summary(b2)
+
+
+# Comparing the models with an anova
+anova(b1,b2) # the models are identical: it is the same to include or exclude the random factor, so I will go with the simpler model, without the random factor
+
+# Final model
+b2<-glm(bin~timemin+t.amb+rainpassed2+phase, data=peek, family=binomial)
+summary(b2)
+
+
+```
+
+#### Checking residuals of global model
+
+```{r}
+# Global model without the random factor (best model according to anova)
+## Checking for overdispersion
+summary(b2)
+glanceb2<-glance(b2)
+glanceb2
+gofb2 <- with(glanceb2,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb2 #p-value to test overdispersion
+#This model is significantly overdispersed: X2= 190.51, df=152, p=0.02
+
+## Plotting residuals for each variable
+b2test <- augment(b2) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+lin.time<- ggplot(b2test, aes(x = timemin, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.temp <- lin.time + aes(x = t.amb)
+lin.rainpassed2 <- lin.time + aes(x = rainpassed2)
+lin.phase <- lin.time + aes(x = phase)
+#Putting all graphs together
+grid.arrange(lin.time, lin.temp, lin.rainpassed2, lin.phase)
+
+## Checking residuals in general
+check_assumptions(b2)
+t2<-simulateResiduals(b2)
+plot(t2) 
+
+## CONCLUSION: the model is not very robust, it is overdispersed and the residuals look so-so
+
+
+# Model with the random factor
+
+summary(b1)
+gofb1 <- pchisq(190.5,151,lower=FALSE) #creating the object that would allow to get the p-value
+gofb1 #p-value to test overdispersion
+#This model  is significantly overdispersed: X2= 190.5, df=151, p=0.02
+
+
+# Checking residuals
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+t1<-simulateResiduals(b1)
+plot(t1)
+
+
+## CONCLUSION: the model is  is overdispersed and but the residuals look better than the other one
+
+
+```
+#### Plotting GLOBAL model predictions
+```{r}
+# Plotting model predictions
+summary(b2)
+
+p1<-plot_model(b2, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+p1
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+p2<-plot_model(b2, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p3<-plot_model(b2, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p4<-plot_model(b2, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18) 
+p4
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+ rremove("ylab") ,p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab") , ncol=2, nrow=2, labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of peeking out", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+  
+#plot_model(b2, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+#  theme_classic(base_size = 18)
+```
+
+```{r}
+# checking which variables contribute more to the model with the random factor
+models <- list(bin~1+(1|colony),
+              bin~timemin+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin+t.amb+(1|colony),
+              bin~timemin+rainpassed2+(1|colony),
+              bin~timemin+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+               bin~timemin+t.amb+rainpassed2+(1|colony),
+               bin~timemin+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=peek)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+pander(aictab(fits,as.character(models)))
+
+
+# This shows that model 15 and model 14 have very close AIC values (menos de 2 unidades de diferencia) entonces voy a compararlos con un anova
+
+models[[15]]
+models[[14]]
+
+b2<-glmer(bin ~ timemin + t.amb + rainpassed2 + phase+ (1 | colony), data=peek, family=binomial)
+summary(b2)
+
+b3<-glmer(bin ~  t.amb + rainpassed2 + phase+ (1 | colony), data=peek, family=binomial)
+summary(b3)
+
+anova(b2,b3,test="Chisq")
+
+# Conclusion: the variable time is not really contributing to the model, so I could simplify the model by removing it
+
+
+```
+
+#### Checking which variables contribute to the model without the random factor FINAL MODEL
+```{r}
+
+# Checking without the random factor
+models <- list(bin~1,
+              bin~timemin,
+              bin~t.amb,
+              bin~rainpassed2,
+              bin~phase,
+              bin~timemin+t.amb,
+              bin~timemin+rainpassed2,
+              bin~timemin+phase,
+              bin~t.amb+rainpassed2,
+               bin~t.amb+phase,
+              bin~rainpassed2+phase,
+               bin~timemin+t.amb+rainpassed2,
+               bin~timemin+t.amb+phase,
+              bin~t.amb+rainpassed2+phase,
+              bin~timemin+t.amb+rainpassed2+phase)
+fits <- map(models, glm,family=binomial, data=peek)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+pander(aictab(fits,as.character(models)))
+
+# This shows that model 15 and model 14 have very close AIC values (menos de 2 unidades de diferencia) entonces voy a compararlos con un anova
+
+models[[15]]
+models[[14]]
+
+b2<-glm(bin ~ timemin + t.amb + rainpassed2 + phase, data=peek, family=binomial)
+summary(b2)
+
+b3<-glm(bin~ t.amb + rainpassed2 + phase, data=peek, family=binomial)
+summary(b3)
+
+anova(b2,b3,test="Chisq")
+
+# Conclusion: the variable time is not really contributing to the model, so I could simplify the model by removing it
+
+pander(summary(b3))
+```
+
+#### Checking residuals model without time
+```{r}
+# Second best model, technically the same as the global model minus the time and witout random factor
+b3<-glm(bin~ t.amb + rainpassed2 + phase, data=peek, family=binomial)
+summary(b3)
+summary(b3)
+glanceb3<-glance(b3)
+glanceb3
+#Testing over-disperssion of the model
+gofb3 <- with(glanceb3,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb3 #p-value to test overdispersion
+#This model is still significantly overdispersed: X2= 1193.19	, df=153, p=0.015
+
+
+#Plotting each variable
+b3test <- augment(b3) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+
+lin.temp<- ggplot(b3test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.rainpassed2 <- lin.temp + aes(x = rainpassed2)
+lin.phase <- lin.temp + aes(x = phase)
+#Putting all graphs together
+grid.arrange(lin.temp, lin.rainpassed2, lin.phase)
+
+#Checking residuals in general
+check_assumptions(b3)
+
+t3<-simulateResiduals(b3)
+plot(t3)
+
+# conclussion: the model without the random effects and time (the simplest one) is overdispersed as all the other models, however, the residuals look good
+
+
+
+# Second best model, technically the same as the global model minus the time and WITH random factor
+
+b3<-glmer(bin ~  t.amb + rainpassed2 + phase+ (1 | colony), data=peek, family=binomial)
+summary(b3)
+gofb1 <- pchisq(193.2,152,lower=FALSE) #creating the object that would allow to get the p-value
+gofb1 #p-value to test overdispersion
+#This model  is significantly overdispersed: X2= 193.2, df=152, p=0.013
+
+
+# Checking residuals
+residb1 <- augment(b3)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+
+
+t3<-simulateResiduals(b3)
+plot(t3)
+
+
+
+```
+ 
+
+
+#### Plotting model predictions
+
+```{r}
+# Plotting model predictions
+b1<-glm(bin~ t.amb + rainpassed2 + phase, data=peek, family=binomial)
+summary(b1)
+
+P1<-plot_model(b1, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+P1
+ggsave("Plots/Presence Absence behaviors/PA_peek_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+P2<-plot_model(b1, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1),dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+
+P2
+ggsave("Plots/Presence Absence behaviors/PA_peek_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+
+P3<-plot_model(b1, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1),dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted Probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+P3
+ggsave("Plots/Presence Absence behaviors/PA_peek_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+P4<-ggplot(peek, aes(y=bin, x=timemin))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+P4
+
+
+all<-ggarrange(P4+rremove("ylab"),P1+ rremove("ylab") ,P2+ rremove("ylab") ,P3+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of peeking out", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/PA_peek_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+```
+#### Descriptive plots
+```{r}
+# Barplots
+
+#Hour
+hourbin<-peek %>% group_by(halfhour, bin) %>%
+  summarize(count=n())
+hourbin
+ggplot(hourbin, aes(x=halfhour, y=bin))+geom_point(aes(size=count)) 
+
+p1<-hourbin%>%ggplot(aes(x=halfhour, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hour")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)+ theme(axis.text.x=element_text(angle=90, hjust=1))
+p1
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_peek_hour.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#T.amb
+tempbin<-peek%>%  group_by(tempb, bin) %>%
+  summarize(count=n())
+tempbin
+ggplot(tempbin, aes(x=tempb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p2<-tempbin%>%ggplot(aes(x=tempb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_peek_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Rain
+rainbin<-peek %>% 
+  group_by(rainb, bin) %>%
+  summarize(count=n())
+rainbin
+ggplot(rainbin, aes(x=rainb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p3<-rainbin%>%ggplot(aes(x=rainb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hours since last rain")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18) + theme(axis.text.x=element_text(angle=90, hjust=1))
+p3
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_peek_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Phase
+phasebin<-peek %>% 
+  group_by(phase, bin) %>%
+  summarize(count=n())
+phasebin
+ggplot(phasebin, aes(x=phase, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p4<-phasebin%>%ggplot(aes(x=phase, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Moon phase")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present"))+
+  theme_classic(base_size = 18)
+p4
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_peek_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+rremove("ylab"),p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25, common.legend = T, legend="bottom", align="hv")
+
+all
+
+annotate_figure(all, left=textGrob("Proportion", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_peek_all_bar.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+```
+
+### FEEDING
+#### Determining the global model
+
+```{r}
+# Getting the dataset for just this behavior
+feed<-databin%>%filter(beh=="A")
+sum(feed$bin)
+nrow(feed)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=feed, family=binomial)
+summary(b1) # This model issues a warning about re-scaling the variables
+
+
+#feed$rainpassed3<-as.numeric(feed$rainpassed2)
+#summary(feed)
+
+minus<-min(feed$timemin)
+minus
+feed$timemin2<-(feed$timemin-minus)/60 # standarizing it to that the earliest observation is zero and it goes from there, and also converting it to hours
+
+b1<-glmer(bin~timemin2+t.amb+rainpassed2+phase+(1|colony), data=feed, family=binomial)
+summary(b1)  # Scaling time gets rid of the convergence issue. It also doesnt have the isSingular issue, so I can keep the random factor
+```
+
+
+#### Checking residuals of global model
+```{r}
+summary(b1)
+gofb1 <- pchisq(167.2,151,lower=FALSE) #creating the object that would allow to get the p-value
+gofb1 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 167.2, df=151, p=0.17
+
+# Checking residuals
+#check_assumptions(b1)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+t1<-simulateResiduals(b1)
+plot(t1)
+
+## CONCLUSION: the model  is not overdispersed but the residuals dont look good
+```
+
+#### Plotting GLOBAL model predictions
+```{r}
+# Plotting model predictions
+summary(b1)
+
+p1<-plot_model(b1, type = "emm", terms=c("timemin2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+p1
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+p2<-plot_model(b1, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p3<-plot_model(b1, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+p3
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p4<-plot_model(b1, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted probability of feeding", title = NULL) +
+  theme_classic(base_size = 18) 
+p4
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+ rremove("ylab") ,p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab") , ncol=2, nrow=2, labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of feeding", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+  
+#plot_model(b2, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+#  theme_classic(base_size = 18)
+```
+#### Checking which variables contribute more to the model
+
+```{r}
+# checking which variables contribute more to the model
+models <- list(bin~1+(1|colony),
+              bin~timemin2+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin2+t.amb+(1|colony),
+              bin~timemin2+rainpassed2+(1|colony),
+              bin~timemin2+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+               bin~timemin2+t.amb+rainpassed2+(1|colony),
+               bin~timemin2+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin2+t.amb+rainpassed2+phase+(1|colony))
+
+fits <- map(models, glmer,family=binomial, data=feed)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+pander(aictab(fits,as.character(models)))
+
+
+# Model with the variables that most contribute to the model is the model with no variables... it might be better to just do a description for this behavior of the conditions associated with the presence and the absence
+```
+
+
+The best model is the one with no variables.... o sea, las variables no contrinuyen realmente a expicar la varianza de ver o no un pseudo alimentandose # Model with the variables that most contribute to the model is the model with no variables... it might be better to just do a description for this behavior of the conditions associated with the presence and the absence
+
+
+Statistical tests: show that the best model to explain the variance of finding a pseudoscorpion feeding is the model with no variables. I will only do a descriptive plot then to show what the conditions were for the presence and absence of Feeding but that those conditions were not really explaining the chance of them feeding
+
+```{r}
+b1<-glmer(bin~1+(1|colony), data=feed, family=binomial)
+summary(b1)  # Scaling time gets rid of the convergence issue. It also doesnt have the isSingular issue, so I can keep the random factor
+
+b2<-glm(bin~1, data=feed, family="binomial")
+summary(b2)
+
+anova(b1,b2)
+
+# It is important to keep the colony identity
+
+summary(b1)
+t1<-simulateResiduals(b1)
+plot(t1)
+```
+
+
+
+#### Descriptive plots
+
+
+```{r}
+# Point plots
+P1<-ggplot(feed, aes(y=bin, x=t.amb))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+P1
+
+P2<-ggplot(feed, aes(y=bin, x=rainpassed2))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+P2
+
+P3<-ggplot(feed, aes(y=bin, x=phase))+geom_count()  + scale_size_area(max_size = 8)+
+  labs(x = "Moon phase", y = "Probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+
+P3
+
+P4<-ggplot(feed, aes(y=bin, x=timemin2))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)
+P4
+
+all<-ggarrange(P4+rremove("ylab"),P1+ rremove("ylab") ,P2+ rremove("ylab") ,P3+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Probability of feeding", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/PA_feed_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+```
+
+```{r}
+# Barplots
+
+#Hour
+hourbin<-feed %>% group_by(halfhour, bin) %>%
+  summarize(count=n())
+hourbin
+ggplot(hourbin, aes(x=halfhour, y=bin))+geom_point(aes(size=count)) 
+
+p1<-hourbin%>%ggplot(aes(x=halfhour, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hour")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)+ theme(axis.text.x=element_text(angle=90, hjust=1))
+p1
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_hour.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+#T.amb
+tempbin<-feed%>%  group_by(tempb, bin) %>%
+  summarize(count=n())
+tempbin
+ggplot(tempbin, aes(x=tempb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p2<-tempbin%>%ggplot(aes(x=tempb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Rain
+rainbin<-feed %>% 
+  group_by(rainb, bin) %>%
+  summarize(count=n())
+rainbin
+ggplot(rainbin, aes(x=rainb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p3<-rainbin%>%ggplot(aes(x=rainb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hours since last rain")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18) + theme(axis.text.x=element_text(angle=90, hjust=1))
+p3
+
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Phase
+phasebin<-feed %>% 
+  group_by(phase, bin) %>%
+  summarize(count=n())
+phasebin
+ggplot(phasebin, aes(x=phase, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p4<-phasebin%>%ggplot(aes(x=phase, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Moon phase")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present"))+
+  theme_classic(base_size = 18)
+p4
+
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+rremove("ylab"),p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25, common.legend = T, legend="bottom", align="hv")
+
+all
+
+annotate_figure(all, left=textGrob("Proportion", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_all_bar.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+#Colony
+colbin<-feed %>% 
+  group_by(colony, bin) %>%
+  summarize(count=n())
+colbin
+ggplot(colbin, aes(x=colony, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p5<-colbin%>%ggplot(aes(x=colony, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Colony")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present"))+
+  theme_classic(base_size = 18)+theme(legend.position = "top")
+p5
+
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_feed_colony.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+
+```
+
+
+
+### OUTSIDE 2: 
+
+Since there were only 61 instance of walking and 11 of outside, we decided to merge the dataset as just outside the crevice
+```{r}
+out<-databin %>% filter(beh2=="Outside")
+sum(out$bin)
+nrow(out)
+
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=out, family=binomial)
+summary(b1) #IT gives me a error about scaling the variables
+
+out$rainpassed3<-as.numeric(out$rainpassed2)
+summary(out)
+
+minus<-min(out$timemin)
+minus
+out$timemin2<-(out$timemin-minus)/60
+
+b1<-glmer(bin~timemin2+t.amb+rainpassed3+phase+(1|colony), data=out, family=binomial)
+summary(b1)
+
+b2<-glm(bin~timemin2+t.amb+rainpassed3+phase, data=out, family=binomial)
+summary(b2)
+
+anova(b1,b2) # There is no difference on the models, so I will use the one without the random factor
+```
+
+#### Checking residuals of global model
+
+```{r}
+## Checking for overdispersion
+summary(b2)
+glanceb2<-glance(b2)
+glanceb2
+gofb2 <- with(glanceb2,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb2 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 327.3, df=311, p=0.25
+
+## Plotting residuals for each variable
+b2test <- augment(b2) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+lin.time<- ggplot(b2test, aes(x = timemin2, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.temp <- lin.time + aes(x = t.amb)
+lin.rainpassed2 <- lin.time + aes(x = rainpassed3)
+lin.phase <- lin.time + aes(x = phase)
+#Putting all graphs together
+grid.arrange(lin.time, lin.temp, lin.rainpassed2, lin.phase)
+
+## Checking residuals in general
+check_assumptions(b2)
+t2<-simulateResiduals(b2)
+plot(t2) 
+
+## CONCLUSION: the model is robust enough, it is not overdispersed and the residuals look good
+```
+
+#### Plotting GLOBAL model predictions
+```{r}
+# Plotting model predictions
+summary(b2)
+
+p1<-plot_model(b2, type = "emm", terms=c("timemin2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Time of day (min)", y = "Predicted probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+p1
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+p2<-plot_model(b2, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Temperature (°C)", y = "Predicted probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p3<-plot_model(b2, type = "emm", terms=c( "rainpassed3"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+p3
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+p4<-plot_model(b2, type = "emm", terms=c( "phase"), show.data=F, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Moon phase", y = "Predicted probability of being outside", title = NULL) +
+  theme_classic(base_size = 18) 
+p4
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+ rremove("ylab") ,p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab") , ncol=2, nrow=2, labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of being outside", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+  
+#plot_model(b2, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+#  theme_classic(base_size = 18)
+```
+
+
+
+#### Checking which variables contribute more to the model 
+
+```{r}
+# Model with the variables that most contribute to the model FINAL MODEL
+
+
+# Checking without the random effect
+models <- list(bin~1,
+              bin~timemin2,
+              bin~t.amb,
+              bin~rainpassed3,
+              bin~phase,
+              bin~timemin2+t.amb,
+              bin~timemin2+rainpassed3,
+              bin~timemin2+phase,
+              bin~t.amb+rainpassed3,
+               bin~t.amb+phase,
+              bin~rainpassed3+phase,
+               bin~timemin2+t.amb+rainpassed3,
+               bin~timemin2+t.amb+phase,
+              bin~t.amb+rainpassed3+phase,
+              bin~timemin2+t.amb+rainpassed3+phase)
+
+
+fits <- map(models, glm,family=binomial, data=out)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+pander(aictab(fits,as.character(models)))
+
+
+
+# Model with the variables that most contribute to the model
+b2<-glm(bin~ rainpassed3 , data=out, family=binomial)
+summary(b2)
+
+#which(!models$converged) # Models that had convergence issues
+
+#pander(model.sel(models$fits))
+
+
+summary(models$fit[[4]]) 
+```
+
+
+
+```{r}
+# checking which variables contribute more to the model to test for the random factor
+models <- list(bin~1+(1|colony),
+              bin~timemin2+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed3+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin2+t.amb+(1|colony),
+              bin~timemin2+rainpassed3+(1|colony),
+              bin~timemin2+phase+(1|colony),
+              bin~t.amb+rainpassed3+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed3+phase+(1|colony),
+               bin~timemin2+t.amb+rainpassed3+(1|colony),
+               bin~timemin2+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed3+phase+(1|colony),
+              bin~timemin2+t.amb+rainpassed3+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=out)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]]
+
+b3<-glm(bin~rainpassed3, data=out, family=binomial)
+summary(b3)
+b4<-glm(bin~t.amb +rainpassed3, data=out, family=binomial)
+summary(b4)
+b5<-glm(bin~timemin2+t.amb +rainpassed3, data=out, family=binomial)
+summary(b5)
+b6<-glm(bin~1, data=out, family=binomial)
+
+anova(b2,b3, test="Chisq") #No difference
+
+anova(b3,b4, test="Chisq") #No difference
+
+anova(b3,b5, test="Chisq") #no difference
+
+anova(b2,b6, test="Chisq") # difference
+
+anova(b3,b6, test="Chisq") # difference
+
+# The best model is the one with just the rain and without the random factor
+
+b3<-glm(bin~rainpassed3, data=out, family=binomial)
+summary(b3)
+
+```
+#### Checking residuals of final model
+```{r}
+
+summary(b3)
+glanceb3<-glance(b3)
+glanceb3
+#Testing over-disperssion of the model
+gofb3 <- with(glanceb3,pchisq(deviance,df.residual,lower=FALSE)) #creating the object that would allow to get the p-value
+gofb3 #p-value to test overdispersion
+#This model is not significantly overdispersed: X2= 332.63	, df=316, p=0.27
+
+#Plotting each variable
+b3test <- augment(b3) #gets a dataframe with each value foe each variable, covariate, the residuals, fitted, std.resid, .hat, cook sd, etc
+
+lin.temp<- ggplot(b3test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE) 
+#Creating the other graphs
+lin.rainpassed3 <- lin.temp + aes(x = rainpassed3)
+lin.rainpassed3
+
+#Checking residuals in general
+check_assumptions(b3)
+
+
+t3<-simulateResiduals(b3)
+plot(t3)
+
+
+```
+
+
+#### Plotting model predictions
+
+```{r}
+# Plotting model predictions
+P3<-plot_model(b3, type = "pred", terms=c( "rainpassed3"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1),dot.size=5, dot.alpha=0.2)  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+P3
+ggsave("Plots/Presence Absence behaviors/PA_out_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+
+# Plotting other variables
+## Bubble plot
+#time
+P1<-ggplot(data=out, aes(y=bin, x=timemin2))+geom_point(alpha=0.2, size=5) +
+  labs(x = "Time of day (min)", y = "Observations of individuals outside", title = NULL) +
+  theme_classic(base_size = 18)
+P1
+
+
+# Temperature
+P2<-ggplot(data=out, aes(y=bin, x=t.amb))+geom_point(alpha=0.2, size=5) +
+  labs(x = "Temperature (°C)", y = "Observations of individuals outside", title = NULL) +
+  theme_classic(base_size = 18)
+P2
+
+#Phase
+P4<-ggplot(data=out, aes(y=bin, x=phase))+geom_count() + scale_size_area(max_size=8) +
+  labs(x = "Lunar phase", y = "Observations of individuals outside", title = NULL) +
+  theme_classic(base_size = 18) 
+P4
+
+
+
+
+all<-ggarrange(P1+rremove("ylab"),P2+ rremove("ylab") ,P3+ rremove("ylab") ,P4+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
+
+all
+
+annotate_figure(all, left=textGrob("Predicted probability of being outside", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/PA_out_all.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+## Barplot
+out%>%ggplot(aes(x=phase, fill=as.factor(bin)))+
+  geom_bar( position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) + 
+  facet_wrap(~beh2, ncol=1)
+
+```
+
+#### Descriptive plots
+```{r}
+# Barplots
+
+#Hour
+hourbin<-out %>% group_by(halfhour, bin) %>%
+  summarize(count=n())
+hourbin
+ggplot(hourbin, aes(x=halfhour, y=bin))+geom_point(aes(size=count)) 
+
+p1<-hourbin%>%ggplot(aes(x=halfhour, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hour")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)+ theme(axis.text.x=element_text(angle=90, hjust=1))
+p1
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_out_hour.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#T.amb
+tempbin<-out%>%  group_by(tempb, bin) %>%
+  summarize(count=n())
+tempbin
+ggplot(tempbin, aes(x=tempb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p2<-tempbin%>%ggplot(aes(x=tempb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18)
+p2
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_out_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Rain
+rainbin<-out %>% 
+  group_by(rainb, bin) %>%
+  summarize(count=n())
+rainbin
+ggplot(rainbin, aes(x=rainb, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p3<-rainbin%>%ggplot(aes(x=rainb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hours since last rain")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present")) +
+  theme_classic(base_size = 18) + theme(axis.text.x=element_text(angle=90, hjust=1))
+p3
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_out_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+#Phase
+phasebin<-out%>% 
+  group_by(phase, bin) %>%
+  summarize(count=n())
+phasebin
+ggplot(phasebin, aes(x=phase, y=bin))+geom_point(aes(size=count), alpha=0.5) 
+
+p4<-phasebin%>%ggplot(aes(x=phase, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Moon phase")+
+  theme_classic() +guides(fill=guide_legend(title= "Behavior present"))+
+  theme_classic(base_size = 18)
+p4
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_out_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+all<-ggarrange(p1+rremove("ylab"),p2+ rremove("ylab") ,p3+ rremove("ylab") ,p4+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25, common.legend = T, legend="bottom", align="hv")
+
+all
+
+annotate_figure(all, left=textGrob("Proportion", rot=90, vjust=0.35, gp=gpar(cex = 1.5)))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_out_all_bar.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+```
+
+ 
+## Plotting ALL BEHAVIORS data with bubble plots and barplots
+```{r}
+#Hour
+hourbin<-databin %>% filter(beh2!="Hiding") %>% group_by(beh2, halfhour, bin) %>%
+  summarize(count=n())
+hourbin
+ggplot(hourbin, aes(x=halfhour, y=bin))+geom_point(aes(size=count)) + facet_wrap(~beh2, ncol=1)
+
+hourbin%>%ggplot(aes(x=halfhour, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Hour")+
+  guides(fill=guide_legend(title= "Behavior present")) + 
+  facet_wrap(~beh2, ncol=2)+
+  theme_classic(base_size = 18) +theme(legend.position = "top", axis.text.x=element_text(angle=90, hjust=1))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_allbeh_hour.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+#T.amb
+tempbin<-databin %>% filter(beh2!="Hiding") %>% group_by(beh2, tempb, bin) %>%
+  summarize(count=n())
+tempbin
+ggplot(tempbin, aes(x=tempb, y=bin))+geom_point(aes(size=count), alpha=0.5) + facet_wrap(~beh2, ncol=2)
+
+tempbin%>%ggplot(aes(x=tempb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  guides(fill=guide_legend(title= "Behavior present")) + 
+  facet_wrap(~beh2, ncol=2)+
+  theme_classic(base_size = 18) +theme(legend.position = "top")
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_allbeh_temp.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+#Rain
+rainbin<-databin %>% filter(beh2!="Hiding") %>% 
+  group_by(beh2, rainb, bin) %>%
+  summarize(count=n())
+rainbin
+ggplot(rainbin, aes(x=rainb, y=bin))+geom_point(aes(size=count), alpha=0.5) + facet_wrap(~beh2, ncol=2)
+
+rainbin%>%ggplot(aes(x=rainb, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+guides(fill=guide_legend(title= "Behavior present")) + 
+  facet_wrap(~beh2, ncol=2)+
+  theme_classic(base_size = 18) +theme(legend.position = "top", axis.text.x=element_text(angle=90, hjust=1))
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_allbeh_rain.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+
+#Phase
+phasebin<-databin %>% filter(beh2!="Hiding") %>%
+  group_by(beh2, phase, bin) %>%
+  summarize(count=n())
+phasebin
+ggplot(phasebin, aes(x=phase, y=bin))+geom_point(aes(size=count), alpha=0.5) + facet_wrap(~beh2, ncol=2)
+
+phasebin%>%ggplot(aes(x=phase, y=count, fill=as.factor(bin)))+
+  geom_bar(stat="identity", position = position_fill(reverse = TRUE)) + 
+  scale_fill_manual(values=c("#4393c3", "#053061")) + 
+  ylab("Proportion") + xlab("Temperature")+
+  guides(fill=guide_legend(title= "Behavior present")) + 
+  facet_wrap(~beh2, ncol=2)+
+  theme_classic(base_size = 18) +theme(legend.position = "top")
+ggsave("Plots/Presence Absence behaviors/Barplots/PA_allbeh_phase.png",plot = last_plot(),width=8, height=8, units="in",bg = "white" )
+```
+
+
+
+
+
+## PRESENCE/ABSENCE of each behavior: Only BCI colonies between 8pm and 4am
+
+### Organizing the data
+```{r}
+# Total number of pseudoscorpions doing the activity
+databinb<-data3 %>% 
+  filter(location=="BCI") %>%
+  pivot_longer(cols=(6:11), names_to = "beh" , values_to="inds") %>%
+  mutate(prop=inds/total, 
+         hour2=factor(hour,levels=c("20","21", "22", "23", "0", "1", "2", "3", "4")),
+         bin=if_else(inds>0,1,0),
+         beh2=case_when(beh=="A"~"Feeding",
+                        beh=="C"~"Outside",
+                        beh=="E"~"Hiding",
+                        beh=="F"~"Outside",
+                        beh=="Q"~"Chelaes exp.",
+                        beh=="S"~"Peeking out",
+                        TRUE~NA),
+         timesec=as.numeric(time),
+         timesec2=as.numeric(daytime),
+         timesec3=if_else(timesec<43200,timesec+86400,timesec),
+         timemin=timesec3/60,
+         timemin2=timemin-min(timemin))
+
+
+databinb<-databinb %>%  dplyr::select(colony, timesec3,timemin,timemin2, daytime, t.amb, rainpassed2, mlight, phase, bin, total, beh, beh2)
+
+
+summary(databinb)
+
+
+```
+
+
+### Chelaes exposed
+```{r}
+chela<-databinb%>%filter(beh=="Q")
+sum(chela$bin)
+nrow(chela)
+
+ggplot(chela, aes(x=timemin))+geom_histogram(binwidth=60)+ ylab("# Observations") + xlab("Time ")+theme_classic()+ facet_wrap(~colony)
+ggplot(chela, aes(x=timemin))+geom_histogram(binwidth=60)+ ylab("# Observations") + xlab(" Time")+theme_classic()
+
+chela2<-chela %>% filter(bin==1)
+ggplot(chela2, aes(x=timemin))+geom_histogram(binwidth=60)+ ylab("# Observations") + xlab("Time ")+theme_classic()+ facet_wrap(~colony)
+ggplot(chela2, aes(x=timemin))+geom_histogram(binwidth=60)+ ylab("# Observations") + xlab(" Time")+theme_classic()
+```
+
+
+```{r}
+b1<-glmer(bin~timemin+(1|colony), data=chela, family=binomial)
+summary(b1)
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chela, family=binomial)
+summary(b1)
+
+b1<-glm(bin~timemin, data=chela, family=binomial)
+summary(b1)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=chela, family=binomial)
+summary(b1)
+
+# Checking the if the results change if doing it by colony
+chelabci5<-databinb%>%filter(beh=="Q") %>% filter(colony=="BCI5")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chelabci5, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=chelabci5, family=binomial)
+summary(b1)
+
+chelabci6<-databinb%>%filter(beh=="Q") %>% filter(colony=="BCI6")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chelabci6, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=chelabci6, family=binomial)
+summary(b1)
+
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+phase, data=chela, family=binomial)
+summary(b1)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=chela, family=binomial)
+summary(b1)
+
+# Checking residuals
+library(statmod)
+library(broom.mixed)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+# Plotting model predictions
+plot_model(b1, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_chelae_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_chelae_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+plot_model(b1, type = "emm", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_chelae_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+
+
+plot_model(b1, type = "emm", terms=c( "phase"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Moon phase", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_chelae_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "est",  show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  theme_classic(base_size = 18)
+
+
+# checking which variables contribute more to the model
+models <- list(bin~1+(1|colony),
+              bin~timemin+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin+t.amb+(1|colony),
+              bin~timemin+rainpassed2+(1|colony),
+              bin~timemin+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+(1|colony),
+              bin~timemin+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=chela)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+
+
+# None of the variables contribute to the model
+
+
+# Other way to test for the model that best explain the data, with information on the weight of the model
+fe <- c("1", "timemin", "t.amb", "rainpassed2", "phase",
+        "timemin+t.amb",
+              "timemin+rainpassed2",
+              "timemin+phase",
+              "t.amb+rainpassed2",
+               "t.amb+phase",
+              "rainpassed2+phase",
+               "timemin+t.amb+rainpassed2",
+               "timemin+t.amb+phase",
+              "t.amb+rainpassed2+phase",
+              "timemin+t.amb+rainpassed2+phase")
+
+re <- c("(1 | colony)")
+forms <- expand.grid(LHS = "bin ~", fe = fe, re = re)
+models <- forms %>% mutate(RHS = paste(fe, re, sep = "+"), model = paste(LHS, RHS), 
+    fits = map(model, ~glmer(as.formula(.x), data = chela, family = binomial)))
+
+models <- mutate(models, converged = !map_lgl(fits, ~length(.x@optinfo$conv$lme4) > 
+    0))
+which(!models$converged) # Models that had convergence issues
+
+pander(model.sel(models$fits))
+
+
+summary(models$fit[[1]])
+
+#None of the variables contribute to the model better do a descritive plot
+```
+
+### Peeking out
+```{r}
+peek<-databinb%>%filter(beh=="S")
+sum(peek$bin)
+nrow(peek)
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+phase, data=peek, family=binomial)
+summary(b1)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=peek, family=binomial)
+summary(b1)
+
+# Checking the if the results change if doing it by colony
+peekbci5<-databinb%>%filter(beh=="S") %>% filter(colony=="BCI5")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+mlight+phase, data=peekbci5, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=peekbci5, family=binomial)
+summary(b1)
+
+peekbci6<-databinb%>%filter(beh=="S") %>% filter(colony=="BCI6")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+mlight+phase, data=peekbci6, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=peekbci6, family=binomial)
+summary(b1)
+
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+phase+(1|colony), data=peek, family=binomial)
+summary(b1)
+
+# Checking residuals
+library(statmod)
+library(broom.mixed)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = mlight, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+# Plotting model predictions
+plot_model(b1, type = "pred", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of Peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_peek_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of Peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_peek_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of Peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_peek_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "mlight"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Presence of moonlight", y = "Predicted Probability of Peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_peek_light.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "phase"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Moon phase", y = "Predicted Probability of Peeking out", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PABCI_peek_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+# checking which variables contribute more to the model
+models <- list(bin~1+(1|colony),
+              bin~timemin+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin+t.amb+(1|colony),
+              bin~timemin+rainpassed2+(1|colony),
+              bin~timemin+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+(1|colony),
+              bin~timemin+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=peek)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+
+
+
+# All the variables contribute to the model
+
+
+# Other way to test for the model that best explain the data, with information on the weight of the model
+fe <- c("1", "timemin", "t.amb", "rainpassed2", "phase",
+        "timemin+t.amb",
+              "timemin+rainpassed2",
+              "timemin+phase",
+              "t.amb+rainpassed2",
+               "t.amb+phase",
+              "rainpassed2+phase",
+               "timemin+t.amb+rainpassed2",
+               "timemin+t.amb+phase",
+              "t.amb+rainpassed2+phase",
+              "timemin+t.amb+rainpassed2+phase")
+
+re <- c("(1 | colony)")
+forms <- expand.grid(LHS = "bin ~", fe = fe, re = re)
+models <- forms %>% mutate(RHS = paste(fe, re, sep = "+"), model = paste(LHS, RHS), 
+    fits = map(model, ~glmer(as.formula(.x), data = peek, family = binomial)))
+
+models <- mutate(models, converged = !map_lgl(fits, ~length(.x@optinfo$conv$lme4) > 
+    0))
+which(!models$converged) # Models that had convergence issues
+
+pander(model.sel(models$fits))
+
+summary(models$fit[[13]])
+
+
+
+```
+
+
+### Feeding
+
+There were only 6 events where we saw them feeding, better to leave it as descriptive
+
+```{r}
+feed<-databinb%>%filter(beh=="A")
+feed$rainpassed3<-as.numeric(feed$rainpassed2)
+summary(feed)
+
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+mlight+phase, data=feed, family=binomial) 
+summary(b1)
+
+b1<-glm(bin~timemin, data=feed, family=binomial) 
+summary(b1)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+mlight+phase+(1|colony), data=feed, family=binomial) 
+summary(b1)
+
+# Checking the if the results change if doing it by colony
+feedbci5<-databinb%>%filter(beh=="A") %>% filter(colony=="BCI5")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+mlight+phase, data=feedbci5, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=feedbci5, family=binomial)
+summary(b1)
+
+feedbci6<-databinb%>%filter(beh=="A") %>% filter(colony=="BCI6")
+
+b1<-glm(bin~timemin+t.amb+rainpassed2+mlight+phase, data=feedbci6, family=binomial)
+summary(b1)
+b1<-glm(bin~timemin, data=feedbci6, family=binomial)
+summary(b1)
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+mlight+phase+(1|colony), data=feed, family=binomial) 
+summary(b1)
+
+# Checking residuals
+library(statmod)
+library(broom.mixed)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = mlight, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+# Plotting model predictions
+plot_model(b1, type = "pred", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of Feeding", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_feed_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of Feeding", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_feed_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of Feeding", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_feed_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "mlight"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Presence of moonlight", y = "Predicted Probability of Feeding", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_feed_light.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "phase"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Moon phase", y = "Predicted Probability of Feeding", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_feed_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+# checking which variables contribute more to the model
+models <- list(bin~1+(1|colony),
+              bin~timemin+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~mlight+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin+t.amb+(1|colony),
+              bin~timemin+rainpassed2+(1|colony),
+              bin~timemin+mlight+(1|colony),
+              bin~timemin+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+mlight+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+mlight+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+              bin~mlight+phase+(1|colony),
+               bin~timemin+t.amb+rainpassed2+(1|colony),
+               bin~timemin+t.amb+mlight+(1|colony),
+               bin~timemin+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+mlight+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+               bin~rainpassed2+mlight+phase+(1|colony),
+              bin~t.amb+rainpassed2+mlight+phase+(1|colony),
+              bin~timemin+rainpassed2+mlight+phase+(1|colony),
+              bin~timemin+t.amb+mlight+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+mlight+(1|colony),
+              bin~timemin+t.amb+rainpassed2+mlight+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=feed)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+
+# Model with the variables that most contribute to the model
+b2<-glmer(bin~mlight+(1|colony), data=feed, family=binomial)
+summary(b2)
+
+
+
+
+# Other way to test for the model that best explain the data, with information on the weight of the model
+fe <- c("1", "timemin", "t.amb", "rainpassed2", "mlight", "phase",
+        "timemin+t.amb",
+              "timemin+rainpassed2",
+              "timemin+mlight",
+              "timemin+phase",
+              "t.amb+rainpassed2",
+               "t.amb+mlight",
+               "t.amb+phase",
+              "rainpassed2+mlight",
+              "rainpassed2+phase",
+              "mlight+phase",
+               "timemin+t.amb+rainpassed2",
+               "timemin+t.amb+mlight",
+               "timemin+t.amb+phase",
+              "t.amb+rainpassed2+mlight",
+              "t.amb+rainpassed2+phase",
+               "rainpassed2+mlight+phase",
+              "t.amb+rainpassed2+mlight+phase",
+              "timemin+rainpassed2+mlight+phase",
+              "timemin+t.amb+mlight+phase",
+              "timemin+t.amb+rainpassed2+phase",
+              "timemin+t.amb+rainpassed2+mlight",
+              "timemin+t.amb+rainpassed2+mlight+phase")
+
+re <- c("(1 | colony)")
+forms <- expand.grid(LHS = "bin ~", fe = fe, re = re)
+models <- forms %>% mutate(RHS = paste(fe, re, sep = "+"), model = paste(LHS, RHS), 
+    fits = map(model, ~glmer(as.formula(.x), data = feed, family = binomial)))
+
+models <- mutate(models, converged = !map_lgl(fits, ~length(.x@optinfo$conv$lme4) > 
+    0))
+which(!models$converged) # Models that had convergence issues
+
+pander(model.sel(models$fits))
+
+
+
+summary(models$fit[[5]])
+
+```
+
+### Outside2: merging outside and walking
+
+There are not enough data to test for outside and walking on BCI (18 out of 194 observations), better leave it as descriptive
+
+```{r}
+out<-databinb%>%filter(grepl("F|C", beh))
+sum(out$bin)
+nrow(out)
+
+b1<-glm(bin~timemin, data=out, family=binomial)
+summary(b1)
+
+
+b1<-glmer(bin~timemin+t.amb+rainpassed2+mlight+phase+(1|colony), data=out, family=binomial)
+summary(b1)
+
+# Checking residuals
+library(statmod)
+library(broom.mixed)
+residb1 <- augment(b1)
+qres.binom <- function(glmer.obj) {
+    p <- fitted(glmer.obj)
+    y <- glmer.obj@resp$y
+    if (!is.null(glmer.obj@resp$weights)) 
+        n <- glmer.obj@resp$weights else n <- rep(1, length(y))
+    y <- n * y
+    a <- pbinom(y - 1, n, p)
+    b <- pbinom(y, n, p)
+    u <- runif(n = length(y), min = a, max = b)
+    qnorm(u)
+}
+residb1$qr <- qres.binom(b1)
+
+ggplot(residb1, aes(x = .fitted, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+probs <- c(0.25, 0.75)
+y <- quantile(residb1$qr, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+ggplot(residb1, aes(sample = qr)) + geom_qq(size = rel(4)) + geom_abline(intercept = int, 
+    slope = slope, linetype = 2, size = 2)
+
+ggplot(residb1, aes(x = .fitted, y = sqrt(abs(qr)))) + geom_point() + geom_smooth() + 
+    geom_hline(yintercept = 1)
+
+ggplot(residb1, aes(x = timemin, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = t.amb, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = rainpassed2, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = mlight, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hline(yintercept = 0, 
+    linetype = 2)
+
+# Plotting model predictions
+plot_model(b1, type = "pred", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Time of day (min)", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_out_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Temperature (°C)", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_out_temp.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "rainpassed2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Hours since last rain", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_out_rain.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "mlight"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Presence of moonlight", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_out_light.png",plot = last_plot(),width=8, height=6, units="in" )
+
+plot_model(b1, type = "pred", terms=c( "phase"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
+  labs(x = "Moon phase", y = "Predicted Probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)
+ggsave("Plots/Presence Absence behaviors/PA_out_phase.png",plot = last_plot(),width=8, height=6, units="in" )
+
+# checking which variables contribute more to the model
+models <- list(bin~1+(1|colony),
+              bin~timemin+(1|colony),
+              bin~t.amb+(1|colony),
+              bin~rainpassed2+(1|colony),
+              bin~mlight+(1|colony),
+              bin~phase+(1|colony),
+              bin~timemin+t.amb+(1|colony),
+              bin~timemin+rainpassed2+(1|colony),
+              bin~timemin+mlight+(1|colony),
+              bin~timemin+phase+(1|colony),
+              bin~t.amb+rainpassed2+(1|colony),
+               bin~t.amb+mlight+(1|colony),
+               bin~t.amb+phase+(1|colony),
+              bin~rainpassed2+mlight+(1|colony),
+              bin~rainpassed2+phase+(1|colony),
+              bin~mlight+phase+(1|colony),
+               bin~timemin+t.amb+rainpassed2+(1|colony),
+               bin~timemin+t.amb+mlight+(1|colony),
+               bin~timemin+t.amb+phase+(1|colony),
+              bin~t.amb+rainpassed2+mlight+(1|colony),
+              bin~t.amb+rainpassed2+phase+(1|colony),
+               bin~rainpassed2+mlight+phase+(1|colony),
+              bin~t.amb+rainpassed2+mlight+phase+(1|colony),
+              bin~timemin+rainpassed2+mlight+phase+(1|colony),
+              bin~timemin+t.amb+mlight+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+phase+(1|colony),
+              bin~timemin+t.amb+rainpassed2+mlight+(1|colony),
+              bin~timemin+t.amb+rainpassed2+mlight+phase+(1|colony))
+
+
+fits <- map(models, glmer,family=binomial, data=out)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+
+# Model with the variables that most contribute to the model
+b2<-glmer(bin~ rainpassed2 + mlight + phase + +(1|colony), data=out, family=binomial)
+summary(b2)
+
+
+
+# Other way to test for the model that best explain the data, with information on the weight of the model
+fe <- c("1", "timemin", "t.amb", "rainpassed2", "mlight", "phase",
+        "timemin+t.amb",
+              "timemin+rainpassed2",
+              "timemin+mlight",
+              "timemin+phase",
+              "t.amb+rainpassed2",
+               "t.amb+mlight",
+               "t.amb+phase",
+              "rainpassed2+mlight",
+              "rainpassed2+phase",
+              "mlight+phase",
+               "timemin+t.amb+rainpassed2",
+               "timemin+t.amb+mlight",
+               "timemin+t.amb+phase",
+              "t.amb+rainpassed2+mlight",
+              "t.amb+rainpassed2+phase",
+               "rainpassed2+mlight+phase",
+              "t.amb+rainpassed2+mlight+phase",
+              "timemin+rainpassed2+mlight+phase",
+              "timemin+t.amb+mlight+phase",
+              "timemin+t.amb+rainpassed2+phase",
+              "timemin+t.amb+rainpassed2+mlight",
+              "timemin+t.amb+rainpassed2+mlight+phase")
+
+re <- c("(1 | colony)")
+forms <- expand.grid(LHS = "bin ~", fe = fe, re = re)
+models <- forms %>% mutate(RHS = paste(fe, re, sep = "+"), model = paste(LHS, RHS), 
+    fits = map(model, ~glmer(as.formula(.x), data = out, family = binomial)))
+
+models <- mutate(models, converged = !map_lgl(fits, ~length(.x@optinfo$conv$lme4) > 
+    0))
+which(!models$converged) # Models that had convergence issues
+
+pander(model.sel(models$fits))
+
+
+summary(models$fit[[22]]) 
+```
+
+
+
+## Looking at total amount of individuals per behavior (June only)
+### Filtering data to only include june data
+```{r}
+# Total number of pseudoscorpions doing the activity
+datajune<-data2 %>% drop_na(total) %>% 
+  #dplyr::select(colony, location,t.amb, h.amb, phase, time, daytime, hour, Q, C, A, S, E, F, total) %>%
+  pivot_longer(cols=(6:11), names_to = "beh" , values_to="inds") %>%
+  mutate(prop=inds/total, 
+         hour2=factor(hour,levels=c("20","21", "22", "23", "0", "1", "2", "3", "4")),
+         bin=if_else(inds>0,1,0),
+         beh2=case_when(beh=="A"~"Feeding",
+                        beh=="C"~"Walking",
+                        beh=="E"~"Hiding",
+                        beh=="F"~"Outside",
+                        beh=="Q"~"Chelaes exp.",
+                        beh=="S"~"Peeking out",
+                        TRUE~NA)) 
+
+
+
+datajune$beh2<-factor(datajune$beh2, levels=c("Hiding", "Peeking out", "Walking", "Outside", "Chelaes exp.", "Feeding"))
+str(datajune)
+```
+
+
+### Variation between behaviors
+```{r}
+ggplot(data=datajune, aes(y=inds, x=colony))+geom_boxplot()+geom_jitter(color="red", alpha=0.5)+facet_wrap(~beh2)
+```
+
+The behaviors with more variation are: feeding, hiding, chelaes exposed and peeking
+
+Walking and standing outside did not have a lot of variation
+
+# Doing amultinomial logistic regression with random effects
+```{r}
+
+m1<-mblogit(beh2~hour+t.amb+rainpassed2+mlight+phase, random=(~1|colony), weights=total, data = datajune, method=c("PQL"), estimator=c("ML"))
+summary(m1)
+
+coefs <- summary(m1)$coefficients
+LLs <- coefs[,1] + qnorm(.025)*coefs[,2]
+ULs <- coefs[,1] + qnorm(.975)*coefs[,2]
+OR <- exp(coefs[,1])
+ORLL <- exp(LLs)
+ORUL <- exp(ULs)
+HHES <- coefs[,1]/1.81 # Hasselblad and Hedges Effect Size
+
+
+round(cbind(coefs, LLs, ULs), 3)
+
+
+datajune2<-datajune %>% dplyr::select(colony, hour, t.amb, rainpassed2,mlight, phase, total, beh2, obsdaytime, inds) %>% uncount(inds)
+str(datajune2)
+datajune2$obsdaytime2<-as.factor(datajune2$obsdaytime)
+
+m2<-mblogit(beh2~hour+t.amb+rainpassed2+mlight+phase, random=list(~1|colony, ~1|obsdaytime2), data = datajune2, method=c("PQL"), estimator=c("ML"))
+summary(m2)
+
+coefs <- summary(m2)$coefficients
+LLs <- coefs[,1] + qnorm(.025)*coefs[,2]
+ULs <- coefs[,1] + qnorm(.975)*coefs[,2]
+OR <- exp(coefs[,1])
+ORLL <- exp(LLs)
+ORUL <- exp(ULs)
+HHES <- coefs[,1]/1.81 # Hasselblad and Hedges Effect Size
+
+
+round(cbind(coefs, LLs, ULs), 3)
+
+
+
+```
+
+
+### Chelaes exposed
+```{r}
+chela<-datajune%>%filter(beh=="Q")
+
+ggplot(chela, aes(x=inds))+geom_histogram(binwidth = 1)
+
+# GLMM with poisson
+f1<-glmer(inds~hour+t.amb+rainpassed2+mlight+phase+(1|colony), data=chela, family=poisson)
+summary(f1) #AIC 320.8 Deviance: 298.8 , resid df:59 
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(f1, add.smooth=FALSE, which=1)
+E<-resid(f1)
+hist(E, xlab="Residuals", main="")
+#plot(chela$hour, E, xlab="cycle", ylab="residuals")
+
+plot_model(f1, type = "resid", show.data=T) 
+
+
+# GLMM negative binomial
+f2<-glmer.nb(inds~hour+t.amb+rainpassed2+mlight+phase+(1|colony), data=chela)
+summary(f2) #AIC 317.6 Deviance: 297.6, resid df:60
+
+m.glm <- glm.nb(inds ~ hour+t.amb+rainpassed2+mlight+phase, data=chela, trace=TRUE)
+## The neg.binomial theta parameter:
+getME(f2, "glmer.nb.theta")
+LL <- logLik(f2)
+## mixed model has 1 additional parameter (RE variance)
+stopifnot(attr(LL,"df")==attr(logLik(m.glm),"df")+1)
+#plot(f4a, resid(.) ~ g)# works, as long as data 'dd' is found
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(f4b, add.smooth=FALSE, which=1)
+E<-resid(f2)
+hist(E, xlab="Residuals", main="")
+
+plot_model(f2, type = "resid", show.data=T) 
+
+
+
+```
+
+
+
+
+
+
+# Pasos: Probar modelo global (glm, o zero inflado, poisson o binom neg) y luego escoger variables (probar lista de modelos y ver cuales variabels aportan mas al modelo)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Analisis done before
+## Per hour
+```{r,eval=FALSE, include=FALSE}
+ggplot(data=datajune, aes(x=hour,y=beh))+
+  geom_density_ridges( jittered_points=T, scale=0.8)+
+  theme_classic()
+
+ggplot(datajune, aes(x=hour2, y=prop)) +geom_boxplot() +facet_wrap(~ beh2, scales="free_y")  + geom_jitter()
+```
+
+
+```{r}
+#Number of occassions on which they were observed doing the behaviors
+ggplot(datajune, aes(x=hour2, y=bin, fill=location)) +geom_bar(stat="identity") +facet_wrap(~ beh)
+
+
+ggplot(datajune, aes(x=hour2, y=inds, fill=location, color=location)) +geom_point() +facet_grid(location~ beh, scales="free_y") 
+ggplot(datajune, aes(x=hour, y=inds, fill=location)) +geom_bar(stat="identity") +facet_grid(location~ beh, scales="free_y")
+ggplot(datajune, aes(x=hour, y=inds, fill=location)) +geom_bar(stat="identity") +facet_grid(beh~ location, scales="free_y")
+ggplot(datajune, aes(x=hour, y=inds, fill=beh)) +geom_bar(stat="identity",position="fill") +facet_wrap(~ location)
+```
+
+
+```{r}
+# Proportional number of pseudoscorpions doing the activity
+ggplot(datajune, aes(x=as.factor(hour), y=prop, fill=location, color=location)) +geom_point() +facet_grid(location~ beh, scales="free_y")
+
+ggplot(datajune, aes(x=daytime, y=inds, fill=location)) + geom_col() +facet_grid(location~ beh, scales="free")
+ggplot(datajune, aes(x=hour, y=prop, fill=location)) +geom_bar(stat="identity") +facet_grid(beh~ location, scales="free_y")
+```
+
+
+```{r}
+# Feeding
+a<-datajune%>% filter(beh=="A")
+a1<-ggplot(a, aes(x=hour2, y=prop)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Proportion") + xlab("Hour")  +guides(color=guide_legend(title="Location"))
+a2<-ggplot(a, aes(x=hour2, y=inds)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Counts") + xlab("Hour") +guides(color=guide_legend(title="Location"))
+ggarrange(a1,a2, ncol=1, common.legend = T, legend="bottom")
+ggsave("Plots/activity_feeding.png", plot = last_plot(), width=6, heigh=4, units="in")
+```
+
+
+```{r}
+# Chelaes
+a<-datajune%>% filter(beh=="Q")
+a1<-ggplot(a, aes(x=hour2, y=prop)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Proportion") + xlab("Hour")  +guides(color=guide_legend(title="Location"))
+a2<-ggplot(a, aes(x=hour2, y=inds)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Counts") + xlab("Hour") +guides(color=guide_legend(title="Location"))
+ggarrange(a1,a2, ncol=1, common.legend = T, legend="bottom")
+ggsave("Plots/activity_chelaes.png", plot = last_plot(), width=6, heigh=4, units="in")
+```
+
+
+```{r}
+# Walking
+a<-datajune%>% filter(beh=="C")
+a1<-ggplot(a, aes(x=hour2, y=prop)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Proportion") + xlab("Hour")  +guides(color=guide_legend(title="Location"))
+a2<-ggplot(a, aes(x=hour2, y=inds)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Counts") + xlab("Hour") +guides(color=guide_legend(title="Location"))
+ggarrange(a1,a2, ncol=1, common.legend = T, legend="bottom")
+ggsave("Plots/activity_walking.png", plot = last_plot(), width=6, heigh=4, units="in")
+```
+
+
+```{r}
+# Peeking out
+a<-datajune%>% filter(beh=="S")
+a1<-ggplot(a, aes(x=hour2, y=prop)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Proportion") + xlab("Hour")  +guides(color=guide_legend(title="Location"))
+a2<-ggplot(a, aes(x=hour2, y=inds)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Counts") + xlab("Hour") +guides(color=guide_legend(title="Location"))
+ggarrange(a1,a2, ncol=1, common.legend = T, legend="bottom")
+ggsave("Plots/activity_peeking.png", plot = last_plot(), width=6, heigh=4, units="in")
+```
+
+
+```{r}
+# Hiding
+a<-datajune%>% filter(beh=="E")
+a1<-ggplot(a, aes(x=hour2, y=prop)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Proportion") + xlab("Hour")  +guides(color=guide_legend(title="Location"))
+a2<-ggplot(a, aes(x=hour2, y=inds)) +geom_boxplot() +geom_jitter(aes(color=location)) + theme_classic() + ylab("Counts") + xlab("Hour") +guides(color=guide_legend(title="Location"))
+ggarrange(a1,a2, ncol=1, common.legend = T, legend="bottom")
+ggsave("Plots/activity_hiding.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+```
+
+
+## Analizing walking data
+```{r}
+a<-datajune%>% filter(beh=="C")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour2, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less over dispersed than before, I think this one works best
+
+#Final model
+summary(Zip3)
+
+```
+
+## Analizing chelae data
+```{r}
+a<-datajune%>% filter(beh=="Q")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour2, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less overdispersed than before, I think this one works best
+
+# Adding colony ID as a random factor to the zero inflated model with Poisson distribution
+Zip4<- glmmadmb (inds~t.amb+h.amb+phase+total+hour+ (1|colony), data = a, zeroInflation = TRUE, family = "poisson")
+summary(Zip4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+# The residuals are a bit more overdispersed than before, but because of the nature of the data I think it is more appropiate to include the colony Id as a random factor.
+
+# Adding colony ID as a random factor to the zero inflated model with negative binomial distribution
+Zip5<- glmmadmb (inds~t.amb+h.amb+phase+total+hour+ (1|colony), data = a, zeroInflation = TRUE, family = "nbinom")
+summary(Zip5)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip5)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+
+#Final model
+summary(Zip5)
+
+```
+
+
+## Analizing feeding data
+```{r}
+a<-datajune%>% filter(beh=="A")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour2, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less overdispersed than before, I think this one works best
+
+#Final model
+summary(Zip3)
+
+```
+
+## Analizing peeking out
+```{r}
+a<-datajune%>% filter(beh=="S")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour2, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less overdispersed than before, I think this one works best
+
+#Final model
+summary(Zip3)
+
+```
+
+## Analizing hiding
+```{r}
+a<-datajune%>% filter(beh=="E")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look too bad
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less overdispersed than before, I think this one works best
+
+#Final model
+summary(mod4)
+
+```
+
+
+## Analizing outside
+```{r}
+a<-datajune%>% filter(beh=="F")
+ggplot(a, aes(x=hour, y=prop)) +geom_bar(stat="identity") + facet_wrap(~location)
+
+ggplot(a, aes(x=daytime, y=prop)) +geom_point(stat="identity") + facet_wrap(~location, nrow=3)
+
+#ggplot(data=a, aes(x=daytime,y=prop))+
+ # geom_density_ridges(stat="identity", jittered_points=T, scale=0.8)+
+  #theme_classic()
+
+mod1<-glm(inds~t.amb+h.amb+phase+hour2+total, family = poisson, data =a)
+summary(mod1)
+sum.mod1 <- glance(mod1)
+sum.mod1
+gof.p.mod1 <- with(sum.mod1,pchisq(deviance,df.residual,lower=FALSE))
+gof.p.mod1
+
+# Checking assumptions
+mod1.test <- augment(mod1)
+lin.vor <- ggplot(mod1.test, aes(x = t.amb, y = .std.resid)) + geom_count() + 
+  scale_size_area(max_size=4) + 
+  geom_hline(yintercept = 0, linetype = 2) + 
+  geom_smooth() + guides(size = FALSE)
+lin.pc1 <- lin.vor + aes(x = h.amb)
+lin.pc2 <- lin.vor + aes(x = phase)
+lin.pc3 <- lin.vor + aes(x = hour2)
+grid.arrange(lin.vor, lin.pc1, lin.pc2, lin.pc3)
+# all seems to be within the acceptable range (do not differ from 0)
+# Checking residual plots:
+resd1 <- ggplot(mod1.test, aes(x = .fitted, y = .resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  geom_hline(yintercept = 0, linetype=2) 
+
+resd2 <- resd1 + aes(y = sqrt(abs(.std.resid))) +
+  geom_hline(yintercept = 1, linetype=2)
+
+resd3 <- ggplot(mod1.test, aes(.hat, .std.resid)) +
+ geom_vline(size = 2, colour = "white", xintercept = 0) +
+  geom_hline(size = 2, colour = "white", yintercept = 0) +
+  geom_point(aes(size = .cooksd)) + geom_smooth(se = FALSE) 
+
+# get int and slope for qqline
+probs <- c(0.25,0.75)
+y <- quantile(mod1.test$.std.resid, probs, names = FALSE, na.rm = TRUE)
+x <- qnorm(probs)
+slope <- diff(y)/diff(x)
+int <- y[1L] - slope * x[1L]
+
+qq.mod <- ggplot(mod1.test, aes(sample=.std.resid)) + 
+  geom_qq(size=rel(4)) + 
+  geom_abline(intercept = int, slope = slope, linetype = 2, size = 2) 
+
+grid.arrange(resd1, resd2, resd3, qq.mod)
+
+# The residuals look overdispersed
+
+# trying adding a random factor to the poisson distribution
+mod2<-glmmPQL(inds~t.amb+h.amb+phase+hour2, random=~1|total, family = poisson, data =a)
+summary(mod2)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod2, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look good.
+
+#Trying negavitve binomial distribution
+mod3<-glm.nb(inds~t.amb+h.amb+phase+hour+total, data =a)
+summary(mod3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod3, add.smooth=FALSE, which=1)
+E<-resid(mod2)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+ 
+# The residuals do not look good.
+
+#Trying adding a random factor with a negative binomial distribution
+mod4<-glmmPQL(inds~t.amb+h.amb+phase+hour, data=a, random = ~ 1 | total, family = negative.binomial (theta =  0.671, link = log))
+summary(mod4)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+plot(mod4, add.smooth=FALSE, which=1)
+E<-resid(mod4)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour2, E, xlab="Hour", ylab="residuals")
+
+# The residuals do not look too bad
+
+# Trying a zero inflated analysis with Poisson distribution
+Zip1<-zeroinfl(inds~t.amb+phase+hour+total|t.amb+phase+hour+total, dist= "poisson", link = "logit", data=a)
+summary(Zip1)
+
+mnull <- update(Zip1, . ~ 1)
+summary(mnull)
+pchisq(2 * (logLik(Zip1) - logLik(mnull)), df = 3, lower.tail = FALSE)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip1, add.smooth=FALSE, which=1)
+E<-resid(Zip1)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="Total", ylab="residuals")
+
+# The residulas look closer to zero and less overdispersed, lets try a zero inflated with a negative binomial distribution
+Zip3<-zeroinfl(inds~t.amb+h.amb+phase+total+hour|t.amb+h.amb+phase+total+hour, dist= "negbin", link = "logit", data=a)
+summary(Zip3)
+
+op<-par(mfrow=c(2,2), mar=c(5,4,1,2))
+#plot(Zip3, add.smooth=FALSE, which=1)
+E<-resid(Zip3)
+hist(E, xlab="Residuals", main="")
+plot(a$t.amb, E, xlab="Temperature", ylab="residuals")
+plot(a$h.amb, E, xlab="Humidity", ylab="residuals")
+plot(a$phase, E, xlab="Phase", ylab="residuals")
+plot(a$hour, E, xlab="Hour", ylab="residuals")
+plot(a$total, E, xlab="total", ylab="residuals")
+
+# The residuals are a bit less overdispersed than before, I think this one works best
+
+#Final model
+summary(Zip3)
+
+```
+
+# Plotting 
+```{r}
+# Temperature
+datajune$t2<-as.factor(round(datajune$t.amb))
+
+ggplot(data=datajune, aes(x=t2, y=prop)) +geom_boxplot()+ facet_wrap(~beh2) +theme_classic() + ylab("Proportion")+
+  xlab("Temperature (°C)")
+
+datajune %>% group_by(beh2, t2) %>%
+  summarize(mean=mean(prop), stdev=sd(prop)) %>% ggplot(aes(x=t2, y=mean, group=1)) +
+  geom_line()+ 
+  geom_point() + 
+  facet_wrap(~beh2) + 
+  geom_errorbar(aes(ymin=mean-stdev,
+                    ymax=mean+stdev),
+                width = 0.2) +
+  theme_classic() +
+  ylab("Mean proportion")+
+  xlab("Temperature (°C)")
+
+ggplot(data=datajune, aes(x=t2, y=inds)) +geom_boxplot()+ facet_wrap(~beh2) +theme_classic() + ylab("Proportion")+
+  xlab("Temperature (°C)")
+
+
+datajune %>% group_by(beh2, t2) %>%
+  summarize(mean=mean(inds), stdev=sd(inds)) %>% ggplot(aes(x=t2, y=mean, group=1)) +
+  geom_line()+ 
+  geom_point() + 
+  facet_wrap(~beh2) + 
+  geom_errorbar(aes(ymin=mean-stdev,
+                    ymax=mean+stdev),
+                width = 0.2) +
+  theme_classic() +
+  ylab("Mean proportion")+
+  xlab("Temperature (°C)")
+
+# Humidity
+datajune$h2<-as.factor(round(datajune$h.amb))
+
+
+ggplot(data=datajune, aes(x=h2, y=inds)) +geom_boxplot()+ facet_wrap(~beh2) +theme_classic() + ylab("Proportion")+
+  xlab("Humidity (%)")
+
+
+datajune %>% group_by(beh2, h2) %>%
+  summarize(mean=mean(inds), stdev=sd(inds)) %>% ggplot(aes(x=h2, y=mean, group=1)) +
+  geom_line()+ 
+  geom_point() + 
+  facet_wrap(~beh2) + 
+  geom_errorbar(aes(ymin=mean-stdev,
+                    ymax=mean+stdev),
+                width = 0.2) +
+  theme_classic() +
+  ylab("Mean proportion")+
+  xlab("Temperature (°C)")
+
+# Hour
+ggplot(data=datajune, aes(x=hour2, y=inds)) +geom_boxplot()+ facet_wrap(~beh2) +theme_classic() + ylab("Proportion")+
+  xlab("Hour")
+
+
+datajune %>% group_by(beh2, hour2) %>%
+  summarize(mean=mean(inds), stdev=sd(inds)) %>% ggplot(aes(x=hour2, y=mean, group=1)) +
+  geom_line()+ 
+  geom_point() + 
+  facet_wrap(~beh2) + 
+  geom_errorbar(aes(ymin=mean-stdev,
+                    ymax=mean+stdev),
+                width = 0.2) +
+  theme_classic() +
+  ylab("Mean proportion")+
+  xlab("Temperature (°C)")
+
+# Phase
+ggplot(data=datajune, aes(x=phase, y=inds)) +geom_boxplot()+ facet_wrap(~beh2) +theme_classic() + ylab("Proportion")+
+  xlab("Lunar phase")
+
+
+datajune %>% group_by(beh2, phase) %>%
+  summarize(mean=mean(inds), stdev=sd(inds)) %>% ggplot(aes(x=phase, y=mean, group=1)) +
+  geom_line()+ 
+  geom_point() + 
+  facet_wrap(~beh2) + 
+  geom_errorbar(aes(ymin=mean-stdev,
+                    ymax=mean+stdev),
+                width = 0.2) +
+  theme_classic() +
+  ylab("Mean proportion")+
+  xlab("Temperature (°C)")
+
+```
+
+
+
+
+# Looking at the activity scale for the two months
+
+## How does activity vary with hour (time)?
+
+### For all data
+```{r}
+
+
+#All data
+ggplot(data=data2, aes(x=daytime,y=act4))+
+  geom_boxplot()+
+  geom_jitter(aes(color=location))+
+  theme_classic()
+
+ggplot(data=data2, aes(y=daytime,x=act4))+
+  geom_boxplot()+
+  geom_jitter(aes(color=location))+
+  theme_classic()
+
+
+ggplot(data=data2, aes(x=daytime))+
+  geom_histogram()+
+ facet_wrap(~act4)+
+  theme_classic()
+
+data2%>%ggplot(aes(x=hour2, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Hour")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) + facet_wrap(~location, nrow=3)
+
+ggsave("Plots/activityscale_all.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+data2%>%ggplot(aes(x=hour2, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Hour")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) + facet_wrap(~colony)
+
+ggsave("Plots/activityscale_colony.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+ggplot(data=data2, aes(x=daytime,y=act4))+
+  geom_density_ridges( jittered_points=T, scale=0.8)+
+  theme_classic()
+```
+
+### Only BCI
+```{r}
+
+data2%>%filter(location=="BCI") %>%
+  ggplot(aes(x=daytime, y=act4))+
+  geom_boxplot() +
+  geom_jitter()+
+  theme_classic()
+
+data2%>%filter(location=="BCI") %>%
+  ggplot(aes(x=daytime))+
+  geom_histogram()+
+ facet_wrap(~act4)+
+  theme_classic()
+
+data2%>%filter(location=="BCI") %>%
+  ggplot(aes(x=hour, fill=act4))+
+  geom_histogram()
+
+data2%>%filter(location=="BCI") %>% ggplot(aes(x=hour2, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Hour")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+
+
+data2%>%filter(location=="BCI") %>%
+ggplot(aes(x=daytime,y=act4))+
+  geom_density_ridges( jittered_points=T, scale=0.8)+
+  theme_classic()
+```
+## How does activity vary between locations?
+
+```{r}
+#All data
+ggplot(data=data2, aes(x=location,y=act3))+
+  geom_boxplot()+
+  geom_jitter(aes(color=daytime))+
+  theme_classic()
+
+ggplot(data2, aes(x=location, fill=act4)) +geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Location")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+ggsave("Plots/activityscale_locations.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+# Using an ordinal logistic regresion
+model<-polr(act4~location, data=data2, Hess=T)
+summary(model)
+## store table
+(ctable <- coef(summary(model)))
+
+## calculate and store p values
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+
+## combined table
+(ctable <- cbind(ctable, "p value" = p))
+
+
+#Plotting the effects 
+library("effects")
+Effect(focal.predictors = "location",model)
+plot(Effect(focal.predictors = "location",model))
+
+
+
+```
+
+## How does activity vary between colonies?
+
+```{r}
+#All data
+ggplot(data=data2, aes(x=colony,y=act3))+
+  geom_boxplot()+
+  geom_jitter(aes(color=daytime))+
+  theme_classic()
+
+ggplot(data2, aes(x=colony, fill=act4)) +geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Colony")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+ggsave("Plots/activityscale_colony.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+# Using an ordinal logistic regresion
+model<-polr(act4~colony, data=data2, Hess=T)
+summary(model)
+## store table
+(ctable <- coef(summary(model)))
+
+## calculate and store p values
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+
+## combined table
+(ctable <- cbind(ctable, "p value" = p))
+
+
+#Plotting the effects 
+library("effects")
+Effect(focal.predictors = "colony",model)
+plot(Effect(focal.predictors = "colony",model))
+
+
+
+```
+
+
+
+## How does activity vary with all the environmental factors? (global model)
+
+```{r}
+# Using an ordinal logistic regresion
+m<-polr(act4~t.amb+h.amb+phase+hour, data=data2, Hess=T) #Ojo: temperature y humedad estan correlacionadas, mejor hacer solo 1. Ademas aca no incluye el efecto de la colonia
+summary(m)
+## store table
+(ctable <- coef(summary(m)))
+## calculate and store p values
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+## combined table
+(ctable <- cbind(ctable, "p value" = p))
+
+#Plotting the effects 
+library("effects")
+Effect(focal.predictors ="t.amb", m)
+plot(Effect(focal.predictors = "t.amb",m))
+Effect(focal.predictors ="h.amb", m)
+plot(Effect(focal.predictors = "h.amb",m))
+Effect(focal.predictors ="phase", m)
+plot(Effect(focal.predictors = "phase",m))
+
+# Adding colony as a random factor
+m2<-clmm(act4~t.amb+phase+hour+(1|colony), data=data2, Hess=T)
+summary(m2)
+
+m3<-clmm(act4~h.amb+phase+hour+(1|colony), data=data2, Hess=T)
+summary(m3)
+
+
+m4<-clmm(act4~t.amb+h.amb+phase+hour+(1|colony), data=data2, Hess=T)
+summary(m4)
+
+
+# checking which variables contribute more to the model
+models <- list(act4~1+(1|colony),
+              act4~t.amb+(1|colony),
+              act4~h.amb+(1|colony),
+              act4~hour+(1|colony),
+              act4~phase+(1|colony),
+              act4~t.amb+h.amb+(1|colony),
+               act4~t.amb+hour+(1|colony),
+               act4~t.amb+phase+(1|colony),
+               act4~h.amb+hour+(1|colony),
+               act4~h.amb+phase+(1|colony),
+               act4~hour+phase+(1|colony),
+              act4~t.amb+h.amb+hour+(1|colony),
+              act4~t.amb+h.amb+phase+(1|colony),
+              act4~t.amb+hour+phase+(1|colony),
+              act4~h.amb+hour+phase+(1|colony),
+              act4~t.amb+h.amb+hour+phase+(1|colony))
+
+fits <- map(models, clmm, data=data2)
+aic <- map_dbl(fits,AIC)
+aic
+which.min(aic)
+models[[which.min(aic)]] 
+
+m5<-clmm(act4~t.amb+hour+(1|colony), data=data2, Hess=T)
+summary(m5)
+
+```
+
+
+## Plot: How does activity vary with ambient temperature?
+```{r}
+#All data
+ggplot(data=data2, aes(x=round(t.amb),y=act4))+
+  geom_boxplot()+
+  geom_jitter(aes(color=location))+
+  theme_classic()
+
+ggplot(data=data2, aes(x=t.amb,y=act4))+
+  geom_density_ridges( jittered_points=T, scale=0.8)+
+  theme_classic()
+
+min(data2$t.amb)
+max(data2$t.amb)
+
+data2$rt.amb<-round(data2$t.amb)
+dat<-data2 %>% group_by(rt.amb, act4) %>% summarize(n=n())
+dat%>% ggplot(aes(x=rt.amb, y=n, fill=act4))+geom_bar(position = position_fill(reverse = TRUE), stat="identity") + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Temperature (°C)")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+
+
+data2%>% ggplot(aes(x=round(t.amb), fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Temperature (°C)")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+
+ggsave("Plots/activityscale_temperature.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2%>% ggplot(aes(x=round(t.amb), fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Temperature (°C)")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) +facet_wrap(~colony)
+ggsave("Plots/activityscale_temperatureby colony.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2%>% ggplot(aes(x=round(t.amb), fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Temperature (°C)")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) +facet_wrap(~location)
+ggsave("Plots/activityscale_temperaturebylocation.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+ggplot(data=data2, aes(x=t.amb))+
+  geom_histogram(binwidth=1)+
+ facet_wrap(~act4)+
+  theme_classic()
+
+data2%>% ggplot(aes(y=round(t.amb), x=act4))+geom_boxplot() + ylab("Activity scale") + xlab("Temperature (°C)")+theme_classic() + geom_jitter()
+
+
+
+```
+## Plot: How does activity vary with ambient humidity?
+```{r}
+#All data
+ggplot(data=data2, aes(x=h.amb,y=act4))+
+  geom_boxplot()+
+  geom_jitter(aes(color=location))+
+  theme_classic()
+
+ggplot(data=data2, aes(x=h.amb,y=act4))+
+  geom_density_ridges( jittered_points=T, scale=0.8)+
+  theme_classic()
+
+data2<-data2 %>% mutate(rh.amb=case_when(between(h.amb, 80,85)~"80-85",
+                                  between(h.amb, 85,90)~"85-90", 
+                                  between(h.amb, 90,95)~"90-95",
+                                  between(h.amb, 95,100)~"95-100", 
+                                  TRUE~NA))
+
+data2%>% ggplot(aes(x=rh.amb, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Humidity (%)")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) 
+ggsave("Plots/activityscale_humidity.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2%>% ggplot(aes(x=rh.amb, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Humidity (%)")+theme_classic() +guides(fill=guide_legend(title="Activity scale")) +facet_wrap(~colony)
+ggsave("Plots/activityscale_humiditybycolony.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+data2%>% ggplot(aes(x=h.amb, y=act3,color=act))+geom_line() + geom_point()+ scale_color_brewer(palette="Reds" ) + ylab("Activity") + xlab("Humidity (%)")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+ggsave("Plots/activityscale_humidity2.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+
+
+```
+
+
+## Plot: How does activity vary with lunar phase?
+```{r}
+#All data
+ggplot(data=data2, aes(x=phase,y=act2))+
+  geom_boxplot()+
+  geom_jitter(aes(color=location))+
+  theme_classic()
+
+ggplot(data=data2, aes(x=act2,y=phase))+
+  geom_density_ridges(jittered_points=T, scale=0.8)+
+  theme_classic()
+
+data2%>% ggplot(aes(x=phase, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Lunar phase")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))
+ggsave("Plots/activityscale_phase.png", plot = last_plot(), width=6, heigh=4, units="in")
+
+data2%>% ggplot(aes(x=phase, fill=act4))+geom_bar(position = position_fill(reverse = TRUE)) + scale_fill_brewer(palette="Reds" ) + ylab("Proportion") + xlab("Lunar phase")+theme_classic() +guides(fill=guide_legend(title="Activity scale"))+facet_wrap(~colony)
+ggsave("Plots/activityscale_phasebycolony.png", plot = last_plot(), width=6, heigh=4, units="in")
+```
+
+
+
