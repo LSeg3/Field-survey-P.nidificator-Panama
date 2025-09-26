@@ -656,8 +656,9 @@ plot(t1)
 ```{r}
 # Plotting model predictions
 p1<-plot_model(b2, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted probability of chelaes exposed", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted probability of chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 p1
 ggsave("Plots/Presence Absence behaviors/Global_model/PA_chelae_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
 
@@ -801,8 +802,8 @@ ggsave("Plots/Presence Absence behaviors/PA_chelae_phase.png",plot = last_plot()
 
 
 P4<-ggplot(chela, aes(y=bin, x=timemin))+geom_point(size=5, alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
 P4
 
 all<-ggarrange(P4+rremove("ylab"),P1+ rremove("ylab") ,P2+ rremove("ylab") ,P3+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
@@ -1019,8 +1020,9 @@ plot(t1)
 summary(b2)
 
 p1<-plot_model(b2, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted probability of peeking out", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 p1
 ggsave("Plots/Presence Absence behaviors/Global_model/PA_peek_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
 
@@ -1266,8 +1268,9 @@ P3
 ggsave("Plots/Presence Absence behaviors/PA_peek_phase.png",plot = last_plot(),width=8, height=6, units="in" )
 
 P4<-ggplot(peek, aes(y=bin, x=timemin))+geom_point(size=5, alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted Probability of peeking out", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted Probability of peeking out", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 P4
 
 
@@ -1438,8 +1441,9 @@ plot(t1)
 summary(b1)
 
 p1<-plot_model(b1, type = "emm", terms=c("timemin2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted probability of feeding", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted probability of feeding", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 p1
 ggsave("Plots/Presence Absence behaviors/Global_model/PA_feed_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
 
@@ -1549,9 +1553,10 @@ P3<-ggplot(feed, aes(y=bin, x=phase))+geom_count()  + scale_size_area(max_size =
 
 P3
 
-P4<-ggplot(feed, aes(y=bin, x=timemin2))+geom_point(size=5, alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Probability of feeding", title = NULL) +
-  theme_classic(base_size = 18)
+P4<-ggplot(feed, aes(y=bin, x=timemin))+geom_point(size=5, alpha=0.2)  +
+  labs(x = "Time of day", y = "Probability of feeding", title = NULL) +
+  theme_classic(base_size = 18)+ scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 P4
 
 all<-ggarrange(P4+rremove("ylab"),P1+ rremove("ylab") ,P2+ rremove("ylab") ,P3+ rremove("ylab"), labels=c("A", "B", "C", "D"), hjust=0.25)
@@ -1726,8 +1731,9 @@ plot(t2)
 summary(b2)
 
 p1<-plot_model(b2, type = "emm", terms=c("timemin2"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1), dot.size=5, dot.alpha=0.2)  +
-  labs(x = "Time of day (min)", y = "Predicted probability of being outside", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted probability of being outside", title = NULL) +
+  theme_classic(base_size = 18)+ scale_x_continuous(breaks = c(-0.23,0.77,1.77, 2.77, 3.77), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 p1
 ggsave("Plots/Presence Absence behaviors/Global_model/PA_out_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
 
@@ -1910,7 +1916,7 @@ ggsave("Plots/Presence Absence behaviors/PA_out_rain.png",plot = last_plot(),wid
 #time
 P1<-ggplot(data=out, aes(y=bin, x=timemin2))+geom_point(alpha=0.2, size=5) +
   labs(x = "Time of day (min)", y = "Observations of individuals outside", title = NULL) +
-  theme_classic(base_size = 18)
+  theme_classic(base_size = 18)+ scale_x_continuous(breaks = c(-0.23,0.77,1.77, 2.77, 3.77), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
 P1
 
 
@@ -2218,8 +2224,9 @@ ggplot(residb1, aes(x = phase, y = qr)) + geom_point() + geom_smooth() + geom_hl
 
 # Plotting model predictions
 plot_model(b1, type = "emm", terms=c("timemin"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
-  labs(x = "Time of day (min)", y = "Predicted Probability of Chelaes exposed", title = NULL) +
-  theme_classic(base_size = 18)
+  labs(x = "Time of day", y = "Predicted Probability of Chelaes exposed", title = NULL) +
+  theme_classic(base_size = 18) + scale_x_continuous(breaks = c(1200,1260,1320, 1380, 1440), labels = c("20:00","21:00","22:00", "23:00", "00:00"))
+
 ggsave("Plots/Presence Absence behaviors/PABCI_chelae_timemin.png",plot = last_plot(),width=8, height=6, units="in" )
 
 plot_model(b1, type = "emm", terms=c( "t.amb"), show.data=T, show.p=T, show.values = T, axis.lim = c(0,1))  +
